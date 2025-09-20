@@ -10,3 +10,6 @@ class Phase(str, Enum):
 
 
 AUTO_PROGRESS_PHASES = {Phase.SUMMARIZING, Phase.CODE_GENERATION, Phase.CODE_VALIDATION}
+
+# Default language settings
+DEFAULT_LANGUAGE = "en"

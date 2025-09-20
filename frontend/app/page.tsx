@@ -354,8 +354,8 @@ export default function Home() {
               <div>
                 <span className="text-sm font-semibold text-foreground">{t("ui.chat.assistant_name")}</span>
                 <Badge
-                  variant="secondary"
-                  className="ml-2 text-xs bg-secondary/20 text-secondary-foreground border-secondary/30"
+                  variant="primary"
+                  className="ml-2 text-xs border-primary/30"
                 >
                   {phase}
                 </Badge>

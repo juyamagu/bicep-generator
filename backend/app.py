@@ -15,11 +15,11 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages, AnyMessage
 
 try:
-    from .constants import Phase, AUTO_PROGRESS_PHASES  # type: ignore
-    from .i18n.messages import get_message, set_language  # type: ignore
+    from .constants import Phase, AUTO_PROGRESS_PHASES, DEFAULT_LANGUAGE  # type: ignore
+    from .i18n.messages import get_message  # type: ignore
 except ImportError:  # 実行方法によっては相対 import が失敗する場合に備える
-    from constants import Phase, AUTO_PROGRESS_PHASES  # type: ignore
-    from i18n.messages import get_message, set_language  # type: ignore
+    from constants import Phase, AUTO_PROGRESS_PHASES, DEFAULT_LANGUAGE  # type: ignore
+    from i18n.messages import get_message  # type: ignore
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Checkpointer: SqliteSaver が無い環境では自動で MemorySaver に切替
@@ -44,8 +44,10 @@ except Exception:
 dotenv.load_dotenv()
 
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+# AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
+CHAT_DEPLOYMENT_NAME = os.getenv("CHAT_DEPLOYMENT_NAME", "gpt-4.1")
+CODE_DEPLOYMENT_NAME = os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
 
 DEBUG_LOG = os.getenv("DEBUG_LOG", "0") in ("1", "true", "True")
 DEBUG_LOG = True
@@ -68,9 +70,15 @@ app.add_middleware(
 # ──────────────────────────────────────────────────────────────────────────────
 # LLM クライアント
 # ──────────────────────────────────────────────────────────────────────────────
-llm = AzureChatOpenAI(
+llm_chat = AzureChatOpenAI(
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    azure_deployment=AZURE_OPENAI_DEPLOYMENT,
+    azure_deployment=CHAT_DEPLOYMENT_NAME,
+    api_version=OPENAI_API_VERSION,
+)
+
+llm_code = AzureChatOpenAI(
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    azure_deployment=CODE_DEPLOYMENT_NAME,
     api_version=OPENAI_API_VERSION,
 )
 
@@ -100,7 +108,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: Optional[str] = "default"  # フロントから会話IDを渡すのが推奨
     message: Optional[str] = None  # 空の場合は「AIの次のステップだけ」進める
-    language: Optional[str] = "ja"  # 言語設定 ("ja" | "en")
+    language: Optional[str] = DEFAULT_LANGUAGE  # 言語設定 ("ja" | "en")
     conversation_history: List[ChatMessage] = []  # 未使用（保持はcheckpointerに任せる）
 
 
@@ -163,7 +171,7 @@ def _history_from_state(state: State) -> List[Dict[str, str]]:
 
 async def hearing(state: State):
     """要件ヒアリング: 1問だけ短く投げる"""
-    language = state.get("language", "ja")
+    language = state.get("language", DEFAULT_LANGUAGE)
     history = _history_from_state(state)
     messages = [
         {
@@ -176,7 +184,7 @@ async def hearing(state: State):
             "content": get_message("prompts.hearing.user_instruction", language),
         },
     ]
-    resp = await llm.ainvoke(messages)
+    resp = await llm_chat.ainvoke(messages)
     question = _to_text(resp.content).strip() or get_message("prompts.hearing.fallback_question", language)
     return {
         "messages": [{"role": "assistant", "content": question}],
@@ -193,7 +201,7 @@ async def hearing(state: State):
 
 def should_hear_again(state: State) -> str:
     """ヒアリング継続判定: 'yes' or 'no' を返す（同期関数）"""
-    language = state.get("language", "ja")
+    language = state.get("language", DEFAULT_LANGUAGE)
     history = _history_from_state(state)
     messages = [
         {
@@ -205,14 +213,14 @@ def should_hear_again(state: State) -> str:
     ]
     if state.get("n_callings", 0) >= MAX_HEARING_CALLS:
         return "no"
-    resp = llm.invoke(messages)
+    resp = llm_chat.invoke(messages)
     ans = _to_text(resp.content).strip().lower()
     return "yes" if "yes" in ans else "no"
 
 
 async def code_generation(state: State):
     """Bicep コード生成 (lint 結果があれば考慮)"""
-    language = state.get("language", "ja")
+    language = state.get("language", DEFAULT_LANGUAGE)
     requirement_summary = state.get("requirement_summary") or "(要件サマリ未生成)"
     lint_output_full = state.get("lint_output") or "(lint 結果なし)"
     previous_code = state.get("bicep_code", "")
@@ -263,7 +271,7 @@ async def code_generation(state: State):
     if DEBUG_LOG:
         print("[code generation prompt]", messages)
 
-    resp = await llm.ainvoke(messages)
+    resp = await llm_code.ainvoke(messages)
     text = _to_text(resp.content).strip()
     code_text = text
     m = re.search(r"```(?:bicep)?\s*\n([\s\S]*?)```", text, flags=re.IGNORECASE)
@@ -290,7 +298,7 @@ async def code_generation(state: State):
 
 async def summarize_requirements(state: State):
     """ヒアリング会話全体から要件サマリを生成し state に格納する。"""
-    language = state.get("language", "ja")
+    language = state.get("language", DEFAULT_LANGUAGE)
     history = _history_from_state(state)
     # 会話履歴を文字列化（長すぎる場合は適度にトリム）
     joined = []
@@ -312,10 +320,12 @@ async def summarize_requirements(state: State):
         },
         {
             "role": "user",
-            "content": get_message("prompts.summarize_requirements.user_instruction", language, raw_dialogue=raw_dialogue),
+            "content": get_message(
+                "prompts.summarize_requirements.user_instruction", language, raw_dialogue=raw_dialogue
+            ),
         },
     ]
-    resp = await llm.ainvoke(messages)
+    resp = await llm_chat.ainvoke(messages)
     summary_text = _to_text(resp.content).strip()
     if not summary_text:
         summary_text = get_message("messages.summarize_requirements.generation_failed", language)
@@ -502,7 +512,8 @@ async def health_check():
 async def get_config():
     return {
         "azure_openai_endpoint": AZURE_OPENAI_ENDPOINT,
-        "azure_openai_deployment": AZURE_OPENAI_DEPLOYMENT,
+        "chat_deployment_name": CHAT_DEPLOYMENT_NAME,
+        "code_deployment_name": CODE_DEPLOYMENT_NAME,
         "openai_api_version": OPENAI_API_VERSION,
     }
 
@@ -551,11 +562,11 @@ async def chat_endpoint(request: ChatRequest):
             print(f"[chat] session={session_id} message={request.message!r}")
 
         # ① 言語設定とHumanの発話を state に追加
-        language = request.language or "ja"
+        language = request.language or DEFAULT_LANGUAGE
         state_update = {"language": language}
         if request.message:
             state_update["messages"] = [{"role": "user", "content": request.message}]
-        
+
         GRAPH.update_state(  # type: ignore[arg-type]
             config,  # type: ignore[arg-type]
             state_update,
