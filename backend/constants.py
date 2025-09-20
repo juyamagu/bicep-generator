@@ -4,12 +4,12 @@ from enum import Enum
 class Phase(str, Enum):
     HEARING = "hearing"
     SUMMARIZING = "summarizing"
-    CODE_GENERATION = "code_generation"
-    CODE_VALIDATION = "code_validation"
+    CODE_GENERATING = "code_generating"
+    CODE_VALIDATING = "code_validating"
     COMPLETED = "completed"
 
 
-AUTO_PROGRESS_PHASES = {Phase.SUMMARIZING, Phase.CODE_GENERATION, Phase.CODE_VALIDATION}
+AUTO_PROGRESS_PHASES = {Phase.SUMMARIZING, Phase.CODE_GENERATING, Phase.CODE_VALIDATING}
 
 # Default language settings
 DEFAULT_LANGUAGE = "en"

@@ -17,9 +17,11 @@ from langgraph.graph.message import add_messages, AnyMessage
 try:
     from .constants import Phase, AUTO_PROGRESS_PHASES, DEFAULT_LANGUAGE  # type: ignore
     from .i18n.messages import get_message  # type: ignore
-except ImportError:  # 実行方法によっては相対 import が失敗する場合に備える
+    from .lint_parser import parse_bicep_lint_output  # type: ignore
+except ImportError:
     from constants import Phase, AUTO_PROGRESS_PHASES, DEFAULT_LANGUAGE  # type: ignore
     from i18n.messages import get_message  # type: ignore
+    from lint_parser import parse_bicep_lint_output  # type: ignore
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Checkpointer: SqliteSaver が無い環境では自動で MemorySaver に切替
@@ -27,7 +29,7 @@ except ImportError:  # 実行方法によっては相対 import が失敗する�
 SqliteSaver = None
 MemorySaver = None
 try:
-    from langgraph.checkpoint.sqlite import SqliteSaver as _SqliteSaver
+    from langgraph.checkpoint.sqlite import SqliteSaver as _SqliteSaver  # type: ignore
 
     SqliteSaver = _SqliteSaver
 except Exception:
@@ -91,10 +93,10 @@ class State(TypedDict):
     n_callings: int
     current_user_message: str
     bicep_code: str  # 最新生成コード
-    lint_output: str  # lint 結果
+    lint_messages: List[Dict[str, Any]]  # 解析済み lint 結果
     validation_passed: bool  # lint 合格
     code_regen_count: int  # 再生成回数（初回生成は含めない）
-    phase: str  # hearing | code_generation | code_validation | completed
+    phase: str  # 次のフェーズ名（フロントで見えるフェーズ）
     requirement_summary: str  # ヒアリング要件サマリ（code_generation プロンプト用）
     language: str  # 言語設定 ("ja" | "en")
 
@@ -121,6 +123,14 @@ class ChatResponse(BaseModel):
     # hearing フェーズの質問などユーザー回答が必要な場面で True
     # 自動で次ステップに進めたい中間メッセージ（要件サマリ表示、コード生成完了、lint 結果表示 等）は False
     requires_user_input: bool = True
+
+
+class BicepLintMessage(BaseModel):
+    filepath: str  # bicep file path
+    line: int  # エラー行
+    column: int  # エラー列
+    error_code: str  # エラーコード
+    message: str  # エラーメッセージ
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -171,6 +181,7 @@ def _history_from_state(state: State) -> List[Dict[str, str]]:
 
 async def hearing(state: State):
     """要件ヒアリング: 1問だけ短く投げる"""
+    print("[hearing] called")
     language = state.get("language", DEFAULT_LANGUAGE)
     history = _history_from_state(state)
     messages = [
@@ -186,21 +197,18 @@ async def hearing(state: State):
     ]
     resp = await llm_chat.ainvoke(messages)
     question = _to_text(resp.content).strip() or get_message("prompts.hearing.fallback_question", language)
+
     return {
         "messages": [{"role": "assistant", "content": question}],
         "n_callings": state.get("n_callings", 0) + 1,
-        "current_user_message": state.get("current_user_message", ""),
-        "bicep_code": state.get("bicep_code", ""),
-        "lint_output": state.get("lint_output", ""),
-        "validation_passed": state.get("validation_passed", False),
         "phase": Phase.HEARING.value,
-        "requirement_summary": state.get("requirement_summary", ""),
-        "language": language,
     }
 
 
 def should_hear_again(state: State) -> str:
     """ヒアリング継続判定: 'yes' or 'no' を返す（同期関数）"""
+    print("[should_hear_again] called")
+    print("[state]", state)
     language = state.get("language", DEFAULT_LANGUAGE)
     history = _history_from_state(state)
     messages = [
@@ -218,11 +226,19 @@ def should_hear_again(state: State) -> str:
     return "yes" if "yes" in ans else "no"
 
 
-async def code_generation(state: State):
+async def code_generating(state: State):
     """Bicep コード生成 (lint 結果があれば考慮)"""
     language = state.get("language", DEFAULT_LANGUAGE)
     requirement_summary = state.get("requirement_summary") or "(要件サマリ未生成)"
-    lint_output_full = state.get("lint_output") or "(lint 結果なし)"
+    lint_messages = state.get("lint_messages", []) or []
+    # lint メッセージを再生成プロンプトで利用するためテキスト化
+    if lint_messages:
+        lint_output_full = "\n".join(
+            f"{m.get('path','?')}({m.get('line','?')},{m.get('column','?')}) : {m.get('severity','?')} {m.get('code','?')}: {m.get('message','')}"
+            for m in lint_messages
+        )
+    else:
+        lint_output_full = "(lint 結果なし)"
     previous_code = state.get("bicep_code", "")
     prev_code_exists = bool(previous_code)
     regen_count = state.get("code_regen_count", 0) + (1 if prev_code_exists else 0)
@@ -287,16 +303,16 @@ async def code_generation(state: State):
         "n_callings": state.get("n_callings", 0),
         "current_user_message": state.get("current_user_message", ""),
         "bicep_code": code_text,
-        "lint_output": state.get("lint_output", ""),
+        "lint_messages": lint_messages,
         "validation_passed": False,
         "code_regen_count": regen_count,
-        "phase": Phase.CODE_GENERATION.value,
+        "phase": Phase.CODE_GENERATING.value,
         "requirement_summary": requirement_summary,
         "language": language,
     }
 
 
-async def summarize_requirements(state: State):
+async def summarizing(state: State):
     """ヒアリング会話全体から要件サマリを生成し state に格納する。"""
     language = state.get("language", DEFAULT_LANGUAGE)
     history = _history_from_state(state)
@@ -342,7 +358,7 @@ async def summarize_requirements(state: State):
     }
 
 
-async def code_validation(state: State):
+async def code_validating(state: State):
 
     def get_bicep_command() -> str:
         if shutil.which("az") is not None:
@@ -353,12 +369,13 @@ async def code_validation(state: State):
     if not code:
         return {
             "messages": [{"role": "assistant", "content": "検証対象コードがありません。"}],
-            "lint_output": "(no code)",
+            # backward compatibility: previously 'lint_output' (str). Now list of parsed messages.
+            "lint_messages": [],
             "validation_passed": False,
         }
 
     tmp_path = None
-    lint_output = ""
+    lint_raw_output = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".bicep", mode="w", encoding="utf-8") as f:
             f.write(code)
@@ -372,13 +389,15 @@ async def code_validation(state: State):
                 timeout=60,
                 shell=True,
             )
-            lint_output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+            lint_raw_output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
         except FileNotFoundError:
-            lint_output = "bicep コマンドが見つかりません。Azure CLI や Bicep 拡張のインストールを確認してください。"
+            lint_raw_output = (
+                "bicep コマンドが見つかりません。Azure CLI や Bicep 拡張のインストールを確認してください。"
+            )
         except subprocess.TimeoutExpired:
-            lint_output = "az bicep lint がタイムアウトしました。"
+            lint_raw_output = "az bicep lint がタイムアウトしました。"
         except Exception as e:  # noqa
-            lint_output = f"lint 実行エラー: {e}"
+            lint_raw_output = f"lint 実行エラー: {e}"
     finally:
         if tmp_path:
             try:
@@ -386,40 +405,37 @@ async def code_validation(state: State):
             except Exception:
                 pass
     if DEBUG_LOG:
-        print("[code_validation] lint_output:", lint_output)
-    lint_output_preview = lint_output.strip()
-    if len(lint_output_preview) > 1200:
-        lint_output_preview = lint_output_preview[:1200] + "... (truncated)"
+        print("[code_validation] lint_raw_output:", lint_raw_output)
 
-    # バリデーションの判定
-    # LLM に判定させるやり方も試したが、単純に error/failed の有無で判定するので問題ないと判断した
-    #
-    # validation_passed = False
-    # messages = [
-    #     {
-    #         "role": "system",
-    #         "content": "あなたは Bicep コードの品質ゲート判定者です。Lint 結果を見て、致命的または重要な問題があって再度コード修正の必要がある場合は 'failed'、無ければ 'passed' で答えてください。回答は 'failed' または 'passed' のみ。",
-    #     },
-    #     {
-    #         "role": "user",
-    #         "content": f"""## Lint Output\n{lint_output}\n""",
-    #     },
-    # ]
-    # try:
-    #     resp = llm.invoke(messages)
-    #     answer = _to_text(resp.content).strip().lower()
-    #     if "passed" in answer:
-    #         validation_passed = True
-    # except Exception:
-    #     pass
-    validation_passed = not bool(re.search(r"\b(error|warning)\b", lint_output, flags=re.IGNORECASE))
+    parsed = parse_bicep_lint_output(lint_raw_output)
+    lint_messages = [
+        {
+            "path": str(m.path),
+            "line": m.line,
+            "column": m.column,
+            "severity": m.severity,
+            "code": m.code,
+            "message": m.message,
+        }
+        for m in parsed
+    ]
+    validation_passed = len(lint_messages) == 0
 
-    message = f"lint 結果:\n==========\n{lint_output_preview}\n"
+    # プレビューは最大10件に制限
+    preview_lines = [
+        f"{m['path']}({m['line']},{m['column']}) : {m['severity']} {m['code']}: {m['message']}"
+        for m in lint_messages[:10]
+    ]
+    if len(lint_messages) > 10:
+        preview_lines.append(f"... ({len(lint_messages)-10} more)")
+    if not preview_lines:
+        preview_lines = ["No lint issues found."]
+    message = "lint 結果:\n==========\n" + "\n".join(preview_lines) + "\n"
     return {
         "messages": [{"role": "assistant", "content": message}],
-        "lint_output": lint_output,
+        "lint_messages": lint_messages,
         "validation_passed": validation_passed,
-        "phase": Phase.CODE_VALIDATION.value,
+        "phase": Phase.CODE_VALIDATING.value,
     }
 
 
@@ -434,7 +450,7 @@ def should_regenerate_code(state: State) -> str:
     return "yes" if not state.get("validation_passed", False) else "no"
 
 
-async def finalize_validation(state: State):
+async def completed(state: State):
     regen_count = state.get("code_regen_count", 0)
     validation_passed = state.get("validation_passed", False)
 
@@ -459,24 +475,28 @@ async def finalize_validation(state: State):
 # ──────────────────────────────────────────────────────────────────────────────
 def build_graph():
     gb = StateGraph(State)
-    gb.add_node("hearing", hearing)
-    gb.add_node("summarize_requirements", summarize_requirements)
-    gb.add_node("code_generation", code_generation)
-    gb.add_node("code_validation", code_validation)
-    gb.add_node("finalize_validation", finalize_validation)
+    gb.add_node(Phase.HEARING.value, hearing)
+    gb.add_node(Phase.SUMMARIZING.value, summarizing)
+    gb.add_node(Phase.CODE_GENERATING.value, code_generating)
+    gb.add_node(Phase.CODE_VALIDATING.value, code_validating)
+    gb.add_node(Phase.COMPLETED.value, completed)
 
     gb.set_entry_point(Phase.HEARING.value)
+    # for debug
+    # gb.add_edge(Phase.HEARING.value, Phase.SUMMARIZING.value)
     gb.add_conditional_edges(
         Phase.HEARING.value,
         should_hear_again,
-        {"yes": Phase.HEARING.value, "no": "summarize_requirements"},
+        {"yes": Phase.HEARING.value, "no": Phase.SUMMARIZING.value},
     )
-    gb.add_edge("summarize_requirements", "code_generation")
-    gb.add_edge("code_generation", "code_validation")
+    gb.add_edge(Phase.SUMMARIZING.value, Phase.CODE_GENERATING.value)
+    gb.add_edge(Phase.CODE_GENERATING.value, Phase.CODE_VALIDATING.value)
     gb.add_conditional_edges(
-        "code_validation", should_regenerate_code, {"yes": "code_generation", "no": "finalize_validation"}
+        Phase.CODE_VALIDATING.value,
+        should_regenerate_code,
+        {"yes": Phase.CODE_GENERATING.value, "no": Phase.COMPLETED.value},
     )
-    gb.set_finish_point("finalize_validation")
+    gb.set_finish_point(Phase.COMPLETED.value)
 
     if SqliteSaver is not None:
         checkpointer = SqliteSaver("checkpoints.db")
@@ -533,7 +553,7 @@ async def reset_conversation(session_id: Optional[str] = "default"):
             "bicep_code": "",
             "n_callings": 0,
             "current_user_message": "",
-            "lint_output": "",
+            "lint_messages": [],
             "validation_passed": False,
             "code_regen_count": 0,
             "phase": "hearing",
@@ -565,7 +585,7 @@ async def chat_endpoint(request: ChatRequest):
         language = request.language or DEFAULT_LANGUAGE
         state_update = {"language": language}
         if request.message:
-            state_update["messages"] = [{"role": "user", "content": request.message}]
+            state_update["messages"] = [{"role": "user", "content": request.message}]  # type: ignore[assignment]
 
         GRAPH.update_state(  # type: ignore[arg-type]
             config,  # type: ignore[arg-type]
@@ -625,7 +645,7 @@ async def chat_endpoint(request: ChatRequest):
             requires_user_input = False
         is_complete = bool((phase == Phase.COMPLETED.value) or bool(passed))
         normalized_phase = phase or (
-            Phase.COMPLETED.value if is_complete else (Phase.CODE_GENERATION.value if bicep else Phase.HEARING.value)
+            Phase.COMPLETED.value if is_complete else (Phase.CODE_GENERATING.value if bicep else Phase.HEARING.value)
         )
         # 完了時メッセージのデフォルト
         default_msg = "Bicepコードの生成が完了しました！" if is_complete else "次の質問を用意しています…"
