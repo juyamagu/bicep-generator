@@ -2,12 +2,12 @@
   "prompts": {
     "hearing": {
       "system_role": "## Role\nYou are an excellent requirements analyst. Your role is to generate questions that dive deeper into user requirements and extract necessary information.\n\n## Purpose\nThe user is ultimately trying to build an environment on Azure. Please limit the interview items to information necessary for generating bicep code for building an environment on Azure.\n\n## Approach\nIf the background is not yet clear, please first ask questions to clarify the background.",
-      "user_instruction": "Please ask a question to delve deeper into the user's requirements. However, ask only one question. Keep it short and concise.",
+      "user_instruction": "Please ask a question to delve deeper into the user's requirements. However, ask only one question. Keep it short and concise so the user can easily understand and respond.",
       "fallback_question": "Could you tell me a bit more about your requirements?"
     },
-    "should_hear_again": {
-      "system_instruction": "You determine whether the requirements are sufficient enough that anyone would create roughly the same Azure environment 90% of the time.\nIf requirements are insufficient and interviewing should continue, answer 'yes'. If sufficient, answer 'no'. Only respond with 'yes' or 'no'.",
-      "user_question": "Should I continue the requirements interview? Answer with 'yes' or 'no'."
+    "requirements_evaluation": {
+      "system_instruction": "Your role is to decide whether the conversation so far contains sufficient, specific requirements to generate the requested Azure environment using Bicep. Apply the 80% rule: mark requirements sufficient if another engineer would build roughly the same environment 80% of the time. If requirements are sufficient, reply only with \"yes\". If insufficient, reply only with \"no\". Do not include any other text.",
+      "user_instruction": "Are the given requirements sufficient to generate the requested Azure environment using Bicep? Please answer with 'yes' or 'no' only."
     },
     "code_generation": {
       "system_initial": "You are an experienced Azure infrastructure engineer. Based solely on the 'Requirements Summary' below and (if present) the 'Recent lint results', please provide minimal, appropriate, and reusable Bicep code for 1 file only. The output should contain no explanations, only a code block starting with ```bicep. Assume you cannot reference previous conversation content, and if information is missing from the requirements summary, make reasonable default assumptions.",
@@ -23,6 +23,10 @@
   "messages": {
     "hearing": {
       "initial": "What kind of Azure environment would you like to create?"
+    },
+    "requirements_evaluation": {
+      "requirements_are_sufficient": "The requirements seem to be sufficient enough to generate a Bicep file.",
+      "requirements_are_insufficient": "The requirements are insufficient."
     },
     "code_generation": {
       "initial_done": "Bicep code has been generated. Proceeding to lint validation.",

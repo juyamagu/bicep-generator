@@ -236,27 +236,29 @@ async def hearing(state: State):
     messages = [
         {
             "role": "system",
-            "content": get_message("prompts.should_hear_again.system_instruction", language),
+            "content": get_message("prompts.requirements_evaluation.system_instruction", language),
         },
         *history,
-        {"role": "user", "content": get_message("prompts.should_hear_again.user_question", language)},
+        {"role": "user", "content": get_message("prompts.requirements_evaluation.user_instruction", language)},
     ]
-    print("[should_hear_again prompt]", messages)
-
-    should_hear_again = "yes"
+    is_sufficient = False
     if state.get("n_callings", 0) >= MAX_HEARING_CALLS:
-        should_hear_again = "no"
+        is_sufficient = True
+        print("[requirements_evaluation] Reached MAX_HEARING_CALLS, forcing to sufficient")
     else:
         resp = llm_chat.invoke(messages)
         ans = _to_text(resp.content).strip().lower()
-        print("[should_hear_again] LLM response:", ans)
-        should_hear_again = "yes" if "yes" in ans else "no"
+        print("[requirements_evaluation] LLM response:", ans)
+        is_sufficient = "yes" in ans
 
     # ヒアリングの必要がない場合は、要件サマリに進む
-    if should_hear_again == "no":
+    if is_sufficient:
         return {
             "messages": [
-                {"role": "assistant", "content": "もう十分な情報が得られたようです。要件サマリを作成します。"}
+                {
+                    "role": "assistant",
+                    "content": get_message("messages.requirements_evaluation.requirements_are_sufficient", language),
+                }
             ],
             "n_callings": state.get("n_callings", 0),
             "phase": Phase.SUMMARIZING.value,

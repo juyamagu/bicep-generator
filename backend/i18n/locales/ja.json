@@ -5,9 +5,9 @@
       "user_instruction": "ユーザーの要件を深掘りするための質問をしてください。ただし、質問は一つだけにしてください。分量は短く、簡潔にしてください。",
       "fallback_question": "要件をもう少し教えてください。"
     },
-    "should_hear_again": {
-      "system_instruction": "あなたは、Azure環境を誰が作っても9割同じになる程度に要件が満ちたか判定します。\n要件が足りておらずヒアリングを続けるべきなら 'yes'、充足していれば 'no'。回答は 'yes' または 'no' のみ。",
-      "user_question": "要件ヒアリングを続けるべきですか？ 'yes' か 'no' で答えてください。"
+    "requirements_evaluation": {
+      "system_instruction": "あなたの役割は、これまでの会話に、Bicep を使って要求された Azure 環境を生成するために十分で具体的な要件が含まれているかどうかを判断することです。80% ルールを適用してください: 他のエンジニアが大体 80% の確率で同じ環境を構築する場合、要件は十分とマークしてください。要件が十分であれば、「yes」のみで返信してください。不十分であれば、「no」のみで返信してください。他のテキストは含めないでください。",
+      "user_instruction": "与えられた要件は、Bicep を使って要求された Azure 環境を生成するのに十分ですか？'yes' または 'no' のみで答えてください。"
     },
     "code_generation": {
       "system_initial": "あなたは熟練した Azure インフラエンジニアです。以下の『要件サマリ』と（存在すれば）『直近の lint 結果』のみを根拠に、最小で妥当かつ再利用しやすい Bicep コードを 1 ファイル分だけ提示してください。出力は説明を含めず、```bicep で始まるコードブロックのみです。以前の会話内容は参照できない前提で、要件サマリ内の情報だけで不足があれば合理的なデフォルトを仮定してください。",
@@ -23,6 +23,10 @@
   "messages": {
     "hearing": {
       "initial": "どのような Azure 環境を作成したいですか？"
+    },
+    "requirements_evaluation": {
+      "requirements_are_sufficient": "Bicep コードの生成に十分な要件をお聞きすることができました！",
+      "requirements_are_insufficient": "要件が不十分です。引き続きヒアリングを続けます。"
     },
     "code_generation": {
       "initial_done": "Bicepコードを生成しました。lint 検証に進みます。",
