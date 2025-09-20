@@ -343,6 +343,16 @@ export default function Home() {
     })
   }, [toast, t])
 
+  // Clear editor code when resetting the conversation
+  const handleReset = useCallback(async () => {
+    try {
+      await resetConversation()
+      setCode(INITIAL_CODE)
+    } catch (error) {
+      console.error("Error during reset:", error)
+    }
+  }, [resetConversation, setCode])
+
   // Auto focus when input becomes available
   useEffect(() => {
     if (!isLoading && !isSystemAdvancing && !isCompletedPhase(phase)) {
@@ -386,7 +396,7 @@ export default function Home() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={resetConversation}
+            onClick={handleReset}
             className="text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-xl"
             title={t("ui.chat.reset_conversation")}
           >
