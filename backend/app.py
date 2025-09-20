@@ -53,7 +53,7 @@ dotenv.load_dotenv()
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
 CHAT_DEPLOYMENT_NAME = os.getenv("CHAT_DEPLOYMENT_NAME", "gpt-4.1")
-CODE_DEPLOYMENT_NAME = "gpt-4.1" or os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
+CODE_DEPLOYMENT_NAME = os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
 
 DEBUG_LOG = os.getenv("DEBUG_LOG", "0") in ("1", "true", "True")  # デバッグログ出力
 MAX_HEARING_COUNT = int(os.getenv("MAX_HEARING_COUNT", "20"))  # ヒアリングの最大回数
