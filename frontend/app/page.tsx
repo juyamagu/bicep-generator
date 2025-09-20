@@ -377,10 +377,7 @@ export default function Home() {
               <div className={cn("p-2 rounded-xl", phaseStatus.color, phaseStatus.animation)}>{phaseStatus.icon}</div>
               <div>
                 <span className="text-sm font-semibold text-foreground">{t("ui.chat.assistant_name")}</span>
-                <Badge
-                  variant="primary"
-                  className="ml-2 text-xs border-primary/30"
-                >
+                <Badge variant="primary" className="ml-2 text-xs border-primary/30">
                   {phase}
                 </Badge>
               </div>
