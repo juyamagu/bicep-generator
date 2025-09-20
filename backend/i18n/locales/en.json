@@ -12,8 +12,8 @@
     "code_generation": {
       "system_initial": "You are an experienced Azure infrastructure engineer. Based solely on the 'Requirements Summary' below and (if present) the 'Recent lint results', please provide minimal, appropriate, and reusable Bicep code for 1 file only. The output should contain no explanations, only a code block starting with ```bicep. Assume you cannot reference previous conversation content, and if information is missing from the requirements summary, make reasonable default assumptions.",
       "system_regeneration": "You are an experienced Azure infrastructure engineer. Please review the 'Existing Code' and 'Lint Results' provided below, resolve critical/important issues while avoiding unnecessary resource additions or over-optimization to improve the Bicep code.\nPlease strictly follow these principles:\n1. Do not change parts of existing code that are already appropriate (minimize diff).\n2. Only supplement deficiencies based on lint/requirements summary. If assumptions are needed, use minimal configuration.\n3. Output code blocks only (no explanations/comments except minimal comments for problem areas).\n4. Do not rename resource names or parameter names unless absolutely necessary for changes.",
-      "user_initial": "## Instructions\nBased on the above, please generate Bicep code for the first time. Keep explanations/comments to a minimum (or none). Return only the code block.",
-      "user_regeneration": "## Instructions\nBased on the above, please reproduce the complete improved Bicep code with minimal modifications. Return only the code block."
+      "user_initial": "Generate the complete Bicep code. Keep explanations/comments to a minimum (or none). Return only the code block.\n\n## Requirements Summary\n{requirement_summary}",
+      "user_regeneration": "Reproduce the complete improved Bicep code with minimal modifications. Return only the code block.\n\n## Requirements Summary\n{requirement_summary}"
     },
     "summarize_requirements": {
       "system_instruction": "Your role is to summerize the user's requirements into a concise, structured format. Considering the conversations so far, please extract the requirements necessary for generating Bicep code for Azure infrastructure and summarize them.",
@@ -28,21 +28,21 @@
       "requirements_are_sufficient": "The requirements seem to be sufficient enough to generate a Bicep file.",
       "requirements_are_insufficient": "The requirements are insufficient."
     },
+    "summarize_requirements": {
+      "generation_succeeded": "Requirements have been consolidated.\n\n===== Requirements Summary =====\n{summary_text}\n\nBicep code will be generated based on these requirements.",
+      "generation_failed": "Failed to generate requirements summary. Use the conversation history as context instead.\n\n===== Conversation History =====\n{summary_text}\n\nBicep code will be generated based on this history."
+    },
     "code_generation": {
       "initial_done": "Bicep code has been generated. Proceeding to lint validation.",
       "regeneration_done": "Bicep code has been improved. Proceeding to lint re-validation.",
       "no_code": "No code available for validation."
     },
-    "summarize_requirements": {
-      "generation_succeeded": "Requirements have been consolidated.\n\n===== Requirements Summary =====\n{summary_text}\n\nBicep code will be generated based on these requirements.",
-      "generation_failed": "Failed to generate requirements summary. Use the conversation history as context instead.\n\n===== Conversation History =====\n{summary_text}\n\nBicep code will be generated based on this history."
-    },
     "code_validation": {
       "no_code": "No code available for validation.",
       "bicep_cmd_not_found": "bicep command not found. Please check your Azure CLI or Bicep extension installation.",
       "execution_error": "Lint execution error: {error}",
-      "lint_succeeded": "No lint issues found.",
-      "lint_failed": "Lint issue found:\n\n{lint_output}"
+      "lint_succeeded": "No bicep lint issues found.",
+      "lint_failed": "Bicep lint issues found:\n\n{lint_output}\n\nTake a look at the code blocks with those issues and gather relevant information from Microsoft Learn Docs to fix them."
     },
     "completed": {
       "default": "Process completed.",

@@ -1,4 +1,3 @@
-from email import message
 import os
 import re
 import shutil
@@ -19,11 +18,15 @@ from langchain_core.messages import AIMessage
 try:
     from .constants import Phase, REQUIRE_USER_INPUT_PHASES, DEFAULT_LANGUAGE  # type: ignore
     from .i18n.messages import get_message  # type: ignore
-    from .lint_parser import parse_bicep_lint_output  # type: ignore
+    from .lint_parser import parse_bicep_lint_output, BicepLintMessage  # type: ignore
+    from .bicep_parser import parse_bicep_blocks  # type: ignore
+    from .utils import fetch_url_content  # type: ignore
 except ImportError:
     from constants import Phase, REQUIRE_USER_INPUT_PHASES, DEFAULT_LANGUAGE  # type: ignore
     from i18n.messages import get_message  # type: ignore
-    from lint_parser import parse_bicep_lint_output  # type: ignore
+    from lint_parser import parse_bicep_lint_output, BicepLintMessage  # type: ignore
+    from bicep_parser import parse_bicep_blocks  # type: ignore
+    from utils import fetch_url_content  # type: ignore
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Checkpointer: SqliteSaver が無い環境では自動で MemorySaver に切替
@@ -50,11 +53,11 @@ dotenv.load_dotenv()
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
 CHAT_DEPLOYMENT_NAME = os.getenv("CHAT_DEPLOYMENT_NAME", "gpt-4.1")
-CODE_DEPLOYMENT_NAME = os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
+CODE_DEPLOYMENT_NAME = "gpt-4.1" or os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
 
 DEBUG_LOG = os.getenv("DEBUG_LOG", "0") in ("1", "true", "True")  # デバッグログ出力
 MAX_HEARING_COUNT = int(os.getenv("MAX_HEARING_COUNT", "20"))  # ヒアリングの最大回数
-MAX_GENERATION_COUNT = int(os.getenv("MAX_GENERATION_COUNT", "3"))  # コード生成の最大回数
+MAX_GENERATION_COUNT = int(os.getenv("MAX_GENERATION_COUNT", "5"))  # コード生成の最大回数
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FastAPI 初期化 & CORS
@@ -93,7 +96,7 @@ class State(TypedDict):
     hearing_count: int
     current_user_message: str
     bicep_code: str  # 最新生成コード
-    lint_messages: List[Dict[str, Any]]  # 解析済み lint 結果
+    lint_messages: List[BicepLintMessage]  # 解析済み lint 結果
     validation_passed: bool  # lint 合格
     generation_count: int  # 生成回数
     phase: str  # 次のフェーズ名（フロントで見えるフェーズ）
@@ -119,18 +122,7 @@ class ChatResponse(BaseModel):
     bicep_code: str = ""
     phase: str = ""
     requirement_summary: str = ""
-    # フロントエンドが次のユーザー入力を待つ必要があるか（True=待つ）
-    # hearing フェーズの質問などユーザー回答が必要な場面で True
-    # 自動で次ステップに進めたい中間メッセージ（要件サマリ表示、コード生成完了、lint 結果表示 等）は False
-    requires_user_input: bool = True
-
-
-class BicepLintMessage(BaseModel):
-    filepath: str  # bicep file path
-    line: int  # エラー行
-    column: int  # エラー列
-    error_code: str  # エラーコード
-    message: str  # エラーメッセージ
+    requires_user_input: bool = True  # フロントエンドが次のユーザー入力を待つ必要があるか（True=待つ）
 
 
 # 初期化ヘルパー: State のデフォルトを返す関数とセッション初期化関数
@@ -344,6 +336,118 @@ async def summarizing(state: State):
     }
 
 
+def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bicep_code: str) -> str:
+    """Lint メッセージに基づいて修正ポイントを記載したコンテキスト文字を取得する"""
+    MAX_BICEP_CODE = 8000
+    MAX_LINT_MESSAGES_FOR_CONTEXT = 3
+
+    bicep_code_for_context = (
+        bicep_code if len(bicep_code) <= MAX_BICEP_CODE else bicep_code[:MAX_BICEP_CODE] + "\n(... truncated)"
+    )
+
+    # lint も code も空なら、context は必要ない
+    if not lint_messages and not bicep_code:
+        return ""
+    # lint のみが空なら、code を context として返す
+    if bicep_code and not lint_messages:
+        return f"## Bicep Code\n{bicep_code_for_context}"
+    # code のみが空なら、lint メッセージを返す (通常はありえないはず)
+    if lint_messages and not bicep_code:
+        print("[_retrieve_code_generation_context] Lint messages but no Bicep code")
+        return "## Lint Messages\n" + "\n".join([str(m) for m in lint_messages])
+
+    context_lines = []
+    bicep_code_blocks = parse_bicep_blocks(bicep_code)
+
+    for lint_message in lint_messages[:MAX_LINT_MESSAGES_FOR_CONTEXT]:
+        print(f"[_retrieve_code_generation_context] Processing lint message: {lint_message}")
+
+        line = lint_message.line
+
+        # 該当行を含むブロックを検索する
+        block = None
+        for b in bicep_code_blocks:
+            if b.start_line <= line <= b.end_line:
+                block = b
+                break
+
+        # 該当するコードブロックが見つからない場合
+        if not block:
+            print(f"[_retrieve_code_generation_context] No code block found for lint message: {lint_message}")
+            context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
+            continue
+
+        # リソース ブロック以外の場合
+        if not block.kind == "resource":
+            print(f"[_retrieve_code_generation_context] Block at line {line} is not a resource, kind={block.kind}")
+            context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
+            continue
+
+        # リソース ブロックの場合
+        # リソースプロバイダ、タイプ、API バージョンを抽出
+        resource_name = ""
+        resource_type = ""
+        api_version = ""
+        m = re.match(r"resource\s+(\w+)\s+'([^@]+)@([^']+)'", block.text)
+        if m:
+            resource_name = m.group(1)
+            resource_type = m.group(2)
+            api_version = m.group(3)
+            print(
+                f"[_retrieve_code_generation_context] Found resource block for lint message at line {line}: {resource_name}, {resource_type}, {api_version}"
+            )
+
+        # リソース文字列がパースできなかった場合
+        if not resource_type:
+            print(f"[_retrieve_code_generation_context] Failed to parse resource block for lint message at line {line}")
+            context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
+            continue
+
+        # 公式ドキュメントの該当ページを取得
+        # Sample: https://learn.microsoft.com/en-us/azure/templates/Microsoft.Network/virtualNetworks/virtualNetworkPeerings?pivots=deployment-language-bicep
+        docs_url = f"https://learn.microsoft.com/en-us/azure/templates/{resource_type.lower()}/?pivots=deployment-language-bicep"
+        docs_content = fetch_url_content(
+            docs_url,
+            timeout=5.0,
+            max_bytes=1_000_000,
+            query_selector='div[data-pivot="deployment-language-bicep"]',
+            compressed=True,
+        )
+        print(f"[_retrieve_code_generation_context] Fetched docs content from {docs_url}, {len(docs_content)} bytes")
+
+        # Lint メッセージ、コードブロック、ドキュメント を基に、改善案を LLM に問い合わせる
+        messages = [
+            {
+                "role": "system",
+                "content": "You are an expert in Bicep. Your role is to provide useful guidance for fixing an inappropriate Bicep code based on the lint message and official documentation. Please make sure your suggestions are concise and directly relevant to the lint message. No other information such as next steps or additional comments is needed.",
+            },
+            {
+                "role": "user",
+                "content": "\n\n".join(
+                    [
+                        "How can I fix the following issue in the Bicep code?",
+                        f"## Lint message\n{str(lint_message)}",
+                        f"## Bicep code block\n- start: {block.start_line}\n- end: {block.end_line}\n\n```bicep{block.text}\n```",
+                        f"## Learn doc:\n{docs_content}\n",
+                    ]
+                ),
+            },
+        ]
+        print("[_retrieve_code_generation_context] Calling LLM for guidance")
+        resp = llm_code.invoke(messages)
+        guidance = _to_text(resp.content).strip()
+        print(f"[_retrieve_code_generation_context] Guidance from LLM:\n{guidance}")
+        if not guidance:
+            context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
+            continue
+        context_lines.append(
+            f"## Lint Message at line {line}\n### Lint Message\n{str(lint_message)}\n### Guidance\n{guidance}"
+        )
+
+    print("[_retrieve_code_generation_context] context_lines:", context_lines)
+    return f"## Bicep Code\n{bicep_code_for_context}" + "\n\n" + "\n\n".join(context_lines)
+
+
 async def code_generating(state: State):
     """Bicep コード生成 / 再生成 ノード
 
@@ -352,73 +456,49 @@ async def code_generating(state: State):
     """
     language = state.get("language", DEFAULT_LANGUAGE)
     requirement_summary = state.get("requirement_summary")
-    assert requirement_summary, "要件サマリがありません。"
-
-    # 生成回数
-    generation_count = state.get("generation_count", 0)
-    is_the_first_generation = generation_count == 0
-
-    # 直近の lint 結果（テキスト化）
-    MAX_LINT_OUTPUT = 3000
-    lint_messages = state.get("lint_messages", []) or []
-    if lint_messages:
-        lint_output = "\n".join(
-            f"Line:{m.get('line','?')}, Column:{m.get('column','?')} : {m.get('severity','?')} {m.get('code','?')}: {m.get('message','')}"
-            for m in lint_messages
-        )
-    else:
-        lint_output = "(lint results are empty)"
-
-    if len(lint_output) > MAX_LINT_OUTPUT:
-        print("[code_generating] Lint output too long, truncating")
-        lint_output = lint_output[:MAX_LINT_OUTPUT] + "\n(... truncated)"
-
-    # 直近の生成コード
-    MAX_BICEP_CODE = 8000
+    assert (
+        isinstance(requirement_summary, str) and requirement_summary.strip()
+    ), "requirement_summary はコード生成に必須"
+    lint_messages = state.get("lint_messages", [])
     bicep_code = state.get("bicep_code", "")
-    if bicep_code:
-        if len(bicep_code) > MAX_BICEP_CODE:
-            bicep_code = bicep_code[:MAX_BICEP_CODE] + "\n(... truncated)"
+    generation_count = state.get("generation_count", 0)
 
     # プロンプト構築
-    # 初回と再生成で system プロンプトを少し分岐
-    context = f"""
-## Requirements
-{requirement_summary}
-
-## Recent Bicep Code
-```bicep
-{bicep_code}
-```
-## Recent Lint Results
-{lint_output}
-"""
-    if is_the_first_generation:
+    if generation_count == 0:
         system_prompt = get_message("prompts.code_generation.system_initial", language)
-        user_prompt = get_message("prompts.code_generation.user_initial", language) + "\n\n" + context
+        user_prompt = get_message(
+            "prompts.code_generation.user_initial", language, requirement_summary=requirement_summary
+        )
         chat_message = get_message("messages.code_generation.initial_done", language)
     else:
         system_prompt = get_message("prompts.code_generation.system_regeneration", language)
-        user_prompt = get_message("prompts.code_generation.user_regeneration", language) + "\n\n" + context
+        user_prompt = get_message(
+            "prompts.code_generation.user_regeneration", language, requirement_summary=requirement_summary
+        )
         chat_message = get_message("messages.code_generation.regeneration_done", language)
 
+    # その他のコンテキストを付与
+    context = _retrieve_code_generation_context(lint_messages, bicep_code)
+    user_prompt += context
+    print("[code_generating] context:", context)
+
+    # LLM 呼び出し
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-    print("[code_generating] messages to LLM:", messages)
+    print("[code_generating] calling LLM to generate a bicep code")
     resp = await llm_code.ainvoke(messages)
-    print("[code_generating] response from LLM:", resp.content)
-    code_text = _to_text(resp.content).strip()
+    print("[code_generating] got response from LLM")
 
     # コードブロックがあれば中身だけ抽出
+    code_text = _to_text(resp.content).strip()
     m = re.search(r"```(?:bicep)?\s*\n([\s\S]*?)```", code_text, flags=re.IGNORECASE)
     if m:
         code_text = m.group(1).strip()
-    else:
-        print("[code_generating] Warning: Could not find code block in LLM response. Assume entire response is code.")
+    print("[code_generating] generated code:", code_text)
 
     return {
         "messages": [{"role": "assistant", "content": chat_message}],
         "bicep_code": code_text,
-        "generation_count": state.get("generation_count", 0) + 1,
+        "generation_count": generation_count + 1,
         "phase": Phase.CODE_VALIDATING.value,  # 次は code_validating に進む
     }
 
@@ -466,29 +546,17 @@ async def code_validating(state: State):
             lint_output_raw = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
             # lint 結果のパース
-            lint_messages = [
-                {
-                    "path": str(lint_msg.path),
-                    "line": lint_msg.line,
-                    "column": lint_msg.column,
-                    "severity": lint_msg.severity,
-                    "code": lint_msg.code,
-                    "message": lint_msg.message,
-                }
-                for lint_msg in parse_bicep_lint_output(lint_output_raw)
-            ]
+            lint_messages = parse_bicep_lint_output(lint_output_raw)
             print("[code_validating] lint_messages:", lint_messages)
 
             # 検証合格かどうか
             validation_passed = len(lint_messages) == 0
 
             # プレビューは最大10件に制限
-            preview_lines = [
-                f"({lint_msg['line']},{lint_msg['column']}): {lint_msg['severity']} {lint_msg['code']}: {lint_msg['message']})"
-                for lint_msg in lint_messages[:10]
-            ]
-            if len(lint_messages) > 10:
-                preview_lines.append(f"... ({len(lint_messages)-10} more)")
+            MAX_LINT_MESSAGES_FOR_PREVIEW = 10
+            preview_lines = [str(lint_msg) for lint_msg in lint_messages[:MAX_LINT_MESSAGES_FOR_PREVIEW]]
+            if len(lint_messages) > MAX_LINT_MESSAGES_FOR_PREVIEW:
+                preview_lines.append(f"... ({len(lint_messages)-MAX_LINT_MESSAGES_FOR_PREVIEW} more)")
             lint_output = "\n".join(preview_lines)
 
             # ユーザーメッセージの構築

@@ -16,7 +16,7 @@ class BicepLintMessage:
     message: str
 
     def __str__(self) -> str:  # pragma: no cover - formatting helper
-        return f"{self.path}({self.line},{self.column}) : {self.severity} {self.code} : {self.message}"  # noqa: E501
+        return f"({self.line},{self.column}) : {self.severity} {self.code} : {self.message}"  # noqa: E501
 
 
 _LINT_LINE_PATTERN = re.compile(
