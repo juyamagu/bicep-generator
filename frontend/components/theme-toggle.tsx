@@ -3,9 +3,14 @@
 import React, { useEffect, useState } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { Sun, Moon } from "lucide-react"
 
-export default function ThemeToggle() {
+export interface ThemeToggleProps {
+  className?: string
+}
+
+export default function ThemeToggle({ className }: ThemeToggleProps) {
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -16,7 +21,7 @@ export default function ThemeToggle() {
   if (!mounted) {
     // Prevent hydration mismatch: render a visually hidden placeholder until mounted
     return (
-      <Button variant="ghost" size="sm" className="invisible">
+      <Button variant="ghost" size="sm" className={cn("invisible", className)}>
         <Sun className="h-4 w-4" />
       </Button>
     )
@@ -30,7 +35,7 @@ export default function ThemeToggle() {
       variant="ghost"
       size="sm"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="text-muted hover:text-app hover-bg-surface-2"
+      className={cn("text-muted hover:text-app hover-bg-surface-2", className)}
       title={isDark ? "Switch to light theme" : "Switch to dark theme"}
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}

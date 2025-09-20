@@ -37,8 +37,8 @@ const INITIAL_CODE = `// ✨ Your Bicep template will appear here when generated
 // Welcome to your modern Bicep generator!` as const
 const API_BASE_URL = "http://localhost:8000"
 const CHAT_WIDTH_MIN = 320
-const CHAT_WIDTH_MAX = 600
-const CHAT_WIDTH_DEFAULT = 460
+const CHAT_WIDTH_MAX = 640
+const CHAT_WIDTH_DEFAULT = 540
 
 const generateSessionId = (): string => {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -378,7 +378,7 @@ export default function Home() {
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden">
       <div
-        className="flex flex-col border-r border-border min-w-0 bg-card rounded-r-2xl mr-1"
+        className="flex flex-col border-r border-border min-w-0 bg-card  mr-1"
         style={{ width: `${chatWidth}px` }}
       >
         <div className="h-16 bg-card border-b border-border flex items-center px-6 justify-between rounded-tr-2xl">
@@ -405,12 +405,12 @@ export default function Home() {
         </div>
 
         <ScrollArea className="flex-1 p-6 h-0">
-          <div className="space-y-6">
+          <div className="space-y-3">
             {messages.map((message) => (
               <div key={message.id} className={cn("flex", message.sender === "user" ? "justify-end" : "justify-start")}>
                 <div
                   className={cn(
-                    "max-w-[85%] rounded-2xl px-5 py-4 text-sm whitespace-pre-wrap break-words shadow-sm",
+                    "max-w-[90%] rounded-2xl px-5 py-3 text-sm whitespace-pre-wrap break-words shadow-sm",
                     message.sender === "user"
                       ? "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground ml-4 rounded-br-lg shadow-md"
                       : "bg-muted/50 text-foreground mr-4 rounded-bl-lg border border-border/50 shadow-md backdrop-blur-sm",
@@ -422,7 +422,7 @@ export default function Home() {
             ))}
             {(isLoading || isSystemAdvancing) && (
               <div className="flex justify-start">
-                <div className="bg-muted/50 text-muted-foreground rounded-2xl rounded-bl-lg px-5 py-4 text-sm mr-4 border border-border/50 shadow-md backdrop-blur-sm">
+                <div className="bg-muted/50 text-muted-foreground rounded-2xl rounded-bl-lg px-5 py-3 text-sm mr-4 border border-border/50 shadow-md backdrop-blur-sm">
                   <div className="flex items-center gap-3">
                     <div className="flex gap-1">
                       <div
@@ -522,8 +522,9 @@ export default function Home() {
             >
               <Play className="h-4 w-4" />
             </Button>
-            <Separator orientation="vertical" className="h-6 mx-2 opacity-30" />
-            <ThemeToggle />
+            {/* text-muted-foreground と同じ色 */}
+            <Separator orientation="vertical" />
+            <ThemeToggle className="text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-xl" />
             <SettingsDialog onLanguageChange={handleLanguageChange} />
           </div>
         </div>
