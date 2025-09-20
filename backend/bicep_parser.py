@@ -33,6 +33,8 @@ class BicepCodeBlock:
     text: str
     start_line: int
     end_line: int
+    # One of: metadata, targetScope, type, func, param, var, resource, module, output
+    kind: Optional[str] = None
 
 
 _QUICK_TOP_LEVEL_START_RE = re.compile(
@@ -41,6 +43,23 @@ _QUICK_TOP_LEVEL_START_RE = re.compile(
 )
 
 _QUOTED_RE = re.compile(r"('(?:\\'|[^'])*'|\"(?:\\\"|[^\"])*\")")
+
+_FIRST_KEYWORD_RE = re.compile(
+    r"^\s*(metadata|targetScope|type|func|param|var|resource|module|output)\b",
+    re.IGNORECASE,
+)
+
+_CANONICAL_KIND = {
+    "metadata": "metadata",
+    "targetscope": "targetScope",
+    "type": "type",
+    "func": "func",
+    "param": "param",
+    "var": "var",
+    "resource": "resource",
+    "module": "module",
+    "output": "output",
+}
 
 
 def _remove_quoted_parts(s: str) -> str:
@@ -86,7 +105,22 @@ def parse_bicep_blocks(text: str) -> List[BicepCodeBlock]:
             assert current_start_idx is not None
             start_line = current_start_idx + 1
             end_line = current_start_idx + len(current)
-            blocks.append(BicepCodeBlock(text=block_text, start_line=start_line, end_line=end_line))
+            # Determine kind by scanning for the first non-decorator, non-empty line
+            kind: Optional[str] = None
+            for ln in current:
+                s = ln.strip()
+                if not s:
+                    continue
+                if s.startswith("@"):
+                    # decorator line -> skip
+                    continue
+                m = _FIRST_KEYWORD_RE.match(ln)
+                if m:
+                    key = m.group(1).lower()
+                    kind = _CANONICAL_KIND.get(key, key)
+                break
+
+            blocks.append(BicepCodeBlock(text=block_text, start_line=start_line, end_line=end_line, kind=kind))
         current = []
         current_start_idx = None
 
@@ -94,37 +128,55 @@ def parse_bicep_blocks(text: str) -> List[BicepCodeBlock]:
         stripped = line.strip()
 
         # Blank line handling: if not inside braces, blank line separates blocks
+        # However, if the current block so far represents only decorators
+        # (possibly with multi-line decorator arguments) and does not yet
+        # include a top-level keyword (param/var/resource/etc.), we should
+        # not finalize here so the decorator remains attached to its
+        # following declaration even across blank lines.
         if stripped == "":
             if brace_depth == 0 and current:
-                finalize_current()
+                # Determine whether current already contains a top-level keyword
+                current_has_top_level = any(_FIRST_KEYWORD_RE.match(ln) for ln in current)
+                if current_has_top_level:
+                    finalize_current()
+                else:
+                    # keep decorator (and its argument lines) until the
+                    # next top-level declaration arrives; preserve blank line
+                    current.append(line)
             else:
                 if current:
                     current.append(line)
             continue
 
-        # Start new block if current is empty and line looks like a top-level start
-        # If the incoming line is a top-level start and it's NOT a decorator
-        # (i.e. a normal top-level declaration like `var`, `param`, etc.)
-        # and we already have a finished top-level block (brace_depth == 0)
-        # then finalize the current block so adjacent single-line
-        # declarations don't get merged into one block. However, if the
-        # current block only contains decorator lines, do not finalize: the
-        # decorator should remain attached to the following construct.
+        # Start new block / attach to current depending on context.
         is_top_level = _QUICK_TOP_LEVEL_START_RE.match(line)
         is_decorator = stripped.startswith("@")
-        if is_top_level and not is_decorator and current and brace_depth == 0:
-            current_has_non_decorator = any((ln.strip() and not ln.strip().startswith("@")) for ln in current)
-            if current_has_non_decorator:
-                finalize_current()
 
-        if not current and is_top_level:
+        if is_top_level and not is_decorator and current and brace_depth == 0:
+            # If the current block already contains a top-level keyword,
+            # it is a completed block and we should finalize it before
+            # starting a new one. If the current block so far is only
+            # decorators (possibly with multi-line args), then the current
+            # non-decorator top-level line belongs to the same block and
+            # should be appended.
+            current_has_top_level = any(_FIRST_KEYWORD_RE.match(ln) for ln in current)
+            if current_has_top_level:
+                finalize_current()
+                # start new block
+                current_start_idx = idx
+                current.append(line)
+            else:
+                # attach this top-level declaration to the existing
+                # decorator block
+                current.append(line)
+        elif not current and is_top_level:
             # starting new block: record its start index
             current_start_idx = idx
             current.append(line)
         else:
             # If current is empty but line does not look like a top-level
             # start, we still start a block (covers e.g. stray comments or
-            # non-standard constructs).
+            # non-standard constructs). Otherwise append to current.
             if not current:
                 current_start_idx = idx
                 current.append(line)
