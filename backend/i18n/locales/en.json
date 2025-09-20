@@ -21,6 +21,9 @@
     }
   },
   "messages": {
+    "hearing": {
+      "initial": "What kind of Azure environment would you like to create?"
+    },
     "code_generation": {
       "initial_done": "Bicep code has been generated. Proceeding to lint validation.",
       "regeneration_done": "Bicep code has been improved. Proceeding to lint re-validation.",

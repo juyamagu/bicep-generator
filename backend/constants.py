@@ -9,7 +9,7 @@ class Phase(str, Enum):
     COMPLETED = "completed"
 
 
-AUTO_PROGRESS_PHASES = {Phase.SUMMARIZING, Phase.CODE_GENERATING, Phase.CODE_VALIDATING}
+AUTO_PROGRESS_PHASES = {Phase.SUMMARIZING, Phase.CODE_GENERATING, Phase.CODE_VALIDATING, Phase.COMPLETED}
 
 # Default language settings
 DEFAULT_LANGUAGE = "en"

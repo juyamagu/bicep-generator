@@ -21,6 +21,9 @@
     }
   },
   "messages": {
+    "hearing": {
+      "initial": "どのような Azure 環境を作成したいですか？"
+    },
     "code_generation": {
       "initial_done": "Bicepコードを生成しました。lint 検証に進みます。",
       "regeneration_done": "Bicepコードを改良しました。lint 再検証に進みます。",
