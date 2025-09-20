@@ -190,6 +190,7 @@ export default function Home() {
   const [code, setCode] = useState<string>(INITIAL_CODE)
   const [inputMessage, setInputMessage] = useState("")
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   const editorTheme = useMemo(() => (theme === "light" ? "light" : "vs-dark"), [theme])
 
@@ -359,6 +360,11 @@ export default function Home() {
     }
   }, [inputMessage, isLoading, isSystemAdvancing, phase])
 
+  // Auto-scroll to bottom when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
+
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden">
       <div
@@ -430,6 +436,7 @@ export default function Home() {
                 </div>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
 
