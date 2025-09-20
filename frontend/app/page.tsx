@@ -216,17 +216,20 @@ export default function Home() {
         color: "bg-gradient-to-r from-primary to-secondary",
         animation: "animate-pulse animate-glow",
         icon: <Zap className="h-3 w-3 text-white" />,
+        borderClass: "border-primary/30",
       }
     if (isCompletedPhase(phase))
       return {
         color: "bg-gradient-to-r from-green-400 to-emerald-500",
         animation: "animate-float",
         icon: <Heart className="h-3 w-3 text-white" />,
+        borderClass: "border-green-400/30",
       }
     return {
       color: "bg-gradient-to-r from-primary to-amber-500",
       animation: "",
       icon: <Sparkles className="h-3 w-3 text-white" />,
+      borderClass: "border-amber-500/30",
     }
   }, [isSystemAdvancing, phase])
 
@@ -403,7 +406,7 @@ export default function Home() {
               <div className={cn("p-2 rounded-xl", phaseStatus.color, phaseStatus.animation)}>{phaseStatus.icon}</div>
               <div>
                 <span className="text-sm font-semibold text-foreground">{t("ui.chat.assistant_name")}</span>
-                <Badge variant="outline" className="ml-2 text-xs border-primary/30">
+                <Badge variant="outline" className={cn("ml-2 text-xs", phaseStatus.borderClass)}>
                   {phase}
                 </Badge>
               </div>
