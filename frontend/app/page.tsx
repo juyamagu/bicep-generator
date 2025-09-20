@@ -406,8 +406,8 @@ export default function Home() {
               <div className={cn("p-2 rounded-xl", phaseStatus.color, phaseStatus.animation)}>{phaseStatus.icon}</div>
               <div>
                 <span className="text-sm font-semibold text-foreground">{t("ui.chat.assistant_name")}</span>
-                <Badge variant="outline" className={cn("ml-2 text-xs", phaseStatus.borderClass)}>
-                  {phase}
+                <Badge variant="outline" className={cn("ml-2 text-xs border-2", phaseStatus.borderClass)}>
+                  {phase.toUpperCase()}
                 </Badge>
               </div>
             </div>
