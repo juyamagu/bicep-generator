@@ -1,7 +1,7 @@
 {
   "prompts": {
     "hearing": {
-      "system_role": "## 役割\nあなたは優秀な要件ヒアリング担当者です。ユーザーの要件を深掘りして、必要な情報を引き出すための質問を生成するのがあなたの役割です。\n\n## 目的\nユーザーは、最終的に Azure 上に環境を構築しようとしています。ヒアリング項目はあくまでも、Azure 上に環境を構築するための bicep コード生成に必要な情報に限定してください。\n\n## 考え方\nまだ背景が明確になっていない場合には、まずは背景を明確にするための質問をしてください。",
+      "system_instruction": "## 役割\nあなたは優秀な要件ヒアリング担当者です。ユーザーの要件を深掘りして、必要な情報を引き出すための質問を生成するのがあなたの役割です。\n\n## 目的\nユーザーは、最終的に Azure 上に環境を構築しようとしています。ヒアリング項目はあくまでも、Azure 上に環境を構築するための bicep コード生成に必要な情報に限定してください。\n\n## 考え方\nまだ背景が明確になっていない場合には、まずは背景を明確にするための質問をしてください。",
       "user_instruction": "ユーザーの要件を深掘りするための質問をしてください。ただし、質問は一つだけにしてください。分量は短く、簡潔にしてください。",
       "fallback_question": "要件をもう少し教えてください。"
     },
@@ -17,7 +17,7 @@
     },
     "summarize_requirements": {
       "system_instruction": "あなたは Azure 向けインフラ要件の要約アシスタントです。これまでのヒアリング会話ログから、Bicep コード生成に必要な要件だけを抽出し、以下のセクション構成で簡潔にまとめてください。\n\n出力フォーマット:\nPurpose: ...\nResources: 箇条書き (種類 / 個数 / SKU / 目的)\nNetworking: VNet, Subnet, DNS, Public IP, NSG, Endpoint など\nSecurity: RBAC, KeyVault, Secrets, Encryption, NetworkRules など\nScaling & Availability: スケール要件 / 可用性ゾーン / SLA 想定\nConstraints: 地域, ネーミング規則, コスト制約, タグ方針\nOther: 追加の注意点（無ければ 'None'）\n\n禁止事項: コード出力や余計な説明。",
-      "user_instruction": "以下がヒアリング会話ログです。要件を抽出し指示フォーマットでまとめてください。\n\n{raw_dialogue}"
+      "user_instruction": "以下がヒアリング会話ログです。要件を抽出し指示フォーマットでまとめてください。\n\n{dialog_history}"
     }
   },
   "messages": {
@@ -34,19 +34,20 @@
       "no_code": "検証対象コードがありません。"
     },
     "summarize_requirements": {
-      "display_message": "要件を集約しました。コード生成へ進みます。\n\n===== 要件サマリ =====\n{summary_text}",
-      "generation_failed": "(要約生成に失敗しました)"
+      "generation_succeeded": "要件を集約しました。\n\n===== 要件サマリ =====\n{summary_text}\n\nこの要件に基づいて Bicep コードを生成します。",
+      "generation_failed": "要件サマリの生成に失敗したため、会話履歴をそのままコンテキストとして使用します。\n\n===== 会話履歴 =====\n{summary_text}\n\nこの会話履歴に基づいて Bicep コードを生成します。"
     },
     "code_validation": {
-      "lint_result": "lint 結果:\n==========\n{lint_output_preview}\n",
-      "bicep_not_found": "bicep コマンドが見つかりません。Azure CLI や Bicep 拡張のインストールを確認してください。",
-      "timeout": "az bicep lint がタイムアウトしました。",
-      "execution_error": "lint 実行エラー: {error}"
+      "no_code": "検証対象コードがありません。",
+      "bicep_cmd_not_found": "bicep コマンドが見つかりません。Azure CLI や Bicep 拡張のインストールを確認してください。",
+      "execution_error": "lint 実行エラー: {error}",
+      "lint_succeeded": "lint 問題は見つかりませんでした。",
+      "lint_failed": "lint 問題が見つかりました:\n\n{lint_output}"
     },
-    "finalize_validation": {
-      "passed": "Bicep コードは検証を通過しました。出力されたコードをご利用ください！",
-      "max_regen_reached": "自動再生成の上限 (MAX_REGEN_CALLS) に達したため処理を終了しました。 残存する警告/エラーがある場合は手動で修正してください。",
-      "failed": "検証をパスしていませんが、処理を終了します。適宜、手動で修正してご利用ください。"
+    "completed": {
+      "default": "処理が完了しました。",
+      "validation_passed": "コードは検証を通過しました。出力されたコードをご利用ください！",
+      "generation_limit_reached": "コード生成の上限 (MAX_GENERATION_COUNT) に達したため処理を終了しました。 残存する警告/エラーがある場合は手動で修正してください。"
     },
     "api": {
       "reset_success": "会話({session_id})がリセットされました",

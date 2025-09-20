@@ -22,7 +22,7 @@ class BicepLintMessage:
 _LINT_LINE_PATTERN = re.compile(
     r"^(?P<path>.+?)\((?P<line>\d+),(?P<col>\d+)\)\s*:\s*(?P<severity>\w+)\s+"  # path, position, severity
     r"(?P<code>[A-Za-z0-9\-]+):\s+"  # code
-    r"(?P<message>.+?)(?:\s*\[https?://.+\])?$"  # message (exclude trailing url)
+    r"(?P<message>.+?)$"  # message (exclude trailing url)
 )
 
 

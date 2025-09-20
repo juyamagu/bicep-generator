@@ -187,6 +187,22 @@ export default function Home() {
     resetConversation,
   } = useChat()
 
+  // Keep refs that always point to the latest state to avoid stale-closure issues
+  const phaseRef = useRef(phase)
+  useEffect(() => {
+    phaseRef.current = phase
+  }, [phase])
+
+  const isSystemAdvancingRef = useRef(isSystemAdvancing)
+  useEffect(() => {
+    isSystemAdvancingRef.current = isSystemAdvancing
+  }, [isSystemAdvancing])
+
+  const isLoadingRef = useRef(isLoading)
+  useEffect(() => {
+    isLoadingRef.current = isLoading
+  }, [isLoading])
+
   const [code, setCode] = useState<string>(INITIAL_CODE)
   const [inputMessage, setInputMessage] = useState("")
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -233,13 +249,13 @@ export default function Home() {
 
   const processChatResponse = useCallback(
     (response: ChatResponse) => {
+      const transitioningToCompleted = isCompletedPhase(response.phase) && !isCompletedPhase(phaseRef.current)
+
       appendAssistantMessage(response)
       if (response.phase) setPhase(response.phase)
       if (response.bicep_code) setCode(response.bicep_code)
 
-      const completed = isCompletedPhase(response.phase)
-      if (completed) {
-        setPhase(PHASE.COMPLETED)
+      if (isCompletedPhase(response.phase) && !transitioningToCompleted) {
         setIsSystemAdvancing(false)
         return
       }
@@ -249,7 +265,7 @@ export default function Home() {
       } else {
         setIsSystemAdvancing(true)
         setTimeout(async () => {
-          if (isCompletedPhase(phase)) return
+          // if (isCompletedPhase(phaseRef.current)) return
           try {
             const resp = await sendMessageToAPI("")
             processChatResponse(resp)
@@ -260,7 +276,7 @@ export default function Home() {
         }, 800)
       }
     },
-    [appendAssistantMessage, setPhase, setCode, setIsSystemAdvancing, phase, sendMessageToAPI],
+    [appendAssistantMessage, setPhase, setCode, setIsSystemAdvancing, sendMessageToAPI],
   )
 
   const handleSendMessage = useCallback(async () => {
@@ -387,7 +403,7 @@ export default function Home() {
               <div className={cn("p-2 rounded-xl", phaseStatus.color, phaseStatus.animation)}>{phaseStatus.icon}</div>
               <div>
                 <span className="text-sm font-semibold text-foreground">{t("ui.chat.assistant_name")}</span>
-                <Badge variant="primary" className="ml-2 text-xs border-primary/30">
+                <Badge variant="outline" className="ml-2 text-xs border-primary/30">
                   {phase}
                 </Badge>
               </div>

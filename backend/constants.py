@@ -9,7 +9,12 @@ class Phase(str, Enum):
     COMPLETED = "completed"
 
 
-AUTO_PROGRESS_PHASES = {Phase.SUMMARIZING, Phase.CODE_GENERATING, Phase.CODE_VALIDATING, Phase.COMPLETED}
+REQUIRE_USER_INPUT_PHASES = {Phase.HEARING}
 
-# Default language settings
-DEFAULT_LANGUAGE = "en"
+
+class Language(str, Enum):
+    EN = "en"
+    JA = "ja"
+
+
+DEFAULT_LANGUAGE = Language.EN
