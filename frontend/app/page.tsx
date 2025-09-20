@@ -189,6 +189,7 @@ export default function Home() {
 
   const [code, setCode] = useState<string>(INITIAL_CODE)
   const [inputMessage, setInputMessage] = useState("")
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   const editorTheme = useMemo(() => (theme === "light" ? "light" : "vs-dark"), [theme])
 
@@ -341,6 +342,23 @@ export default function Home() {
     })
   }, [toast, t])
 
+  // Auto focus when input becomes available
+  useEffect(() => {
+    if (!isLoading && !isSystemAdvancing && !isCompletedPhase(phase)) {
+      const el = inputRef.current
+      if (el && document.activeElement !== el) {
+        requestAnimationFrame(() => el.focus())
+      }
+    }
+  }, [isLoading, isSystemAdvancing, phase])
+
+  // Refocus after send (input cleared) for quick consecutive messages
+  useEffect(() => {
+    if (inputMessage === "" && !isLoading && !isSystemAdvancing && !isCompletedPhase(phase)) {
+      inputRef.current?.focus()
+    }
+  }, [inputMessage, isLoading, isSystemAdvancing, phase])
+
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden">
       <div
@@ -420,6 +438,7 @@ export default function Home() {
         <div className="p-6 bg-card border-t border-border rounded-br-2xl">
           <div className="flex gap-3">
             <Input
+              ref={inputRef}
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={handleKeyPress}
