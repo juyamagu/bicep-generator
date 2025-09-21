@@ -1,37 +1,46 @@
-# Bicep Generator - LangGraph + FastAPI + Next.js
+# AI-Powered Bicep Code Generator for Azure Infrastructure
 
-Azure OpenAI を使って Bicep コードを生成するチャットアプリケーションです。
+![preview](./assets/preview.png)
 
-## 構成
+This is an AI-powered chat application that automates the creation of infrastructure as code (IaC) for Azure infrastructure using Bicep, leveraging LLMs to understand user requirements and generate the code. To make sure the generated code is accurate and adheres to best practices, it incorporates feedback from the Bicep lint tool and retrieves Microsoft docs references. The system operates in the following phases:
 
-- **`main.py`**: オリジナルのコンソールベース LangGraph アプリ
-- **`backend/`**: FastAPI ウェブサーバー（main.py を API 化）
-- **`frontend/`**: Next.js チャット UI（旧: vscode-chat-editor）
+1. **Understands** user requirements interactively through a chat interface.
+2. **Summarizes** the requirements once the system determines enough information has been collected.
+3. **Generates** Bicep code based on the summarized requirements.
+4. **Validates** the generated code using Bicep linting tool.
+5. If linting errors are found, it retrieves relevant context from the linting results and Bicep documentation, and regenerates the code.
+6. Repeats the generation and validation cycle until the code passes linting or reaches a maximum number of attempts.
 
-## 前提条件
+## Why need this?
 
-### 必要なソフトウェア
+- **Target**: Azure engineers (especially Azure Infra engineers)
+- **Problem**: Time-consuming and error-prone to create Azure environments with unique requirements (e.g. PoC)
+- **Goal**: Streamline and automate the process of generating Bicep code for Azure infrastructure, making it easier and faster for engineers to create tailored environments.
+
+## How to run
+
+### Prerequisites
 
 - Python 3.12+
 - Node.js 18+
 - pnpm
+- Azure CLI or bicep CLI
 
-### Azure OpenAI 設定
+### Setup
 
-`.env`ファイルをルートディレクトリに作成し、以下の環境変数を設定してください：
+1. Configure the Azure OpenAI environment variables in a `.env` file.
 
 ```env
 AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
 AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
 OPENAI_API_VERSION=2024-02-15-preview
-AZURE_OPENAI_API_KEY=your-api-key
+CHAT_DEPLOYMENT_NAME=your-chat-deployment-name
+CODE_DEPLOYMENT_NAME=your-code-deployment-name
 ```
 
-## セットアップ・実行手順
+2. Start the backend server.
 
-### 1. バックエンド起動
-
-```bash
+```powershell
 cd backend
 
 # Option 1: venv
@@ -45,90 +54,40 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 uv run -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 2. フロントエンド起動（別ターミナル）
+3. Start the frontend server.
 
-```bash
+```powershell
 cd frontend
 pnpm install
 pnpm dev
 ```
 
-### 3. アプリケーションアクセス
+4. Access the application at [http://localhost:3000](http://localhost:3000).
 
-- **フロントエンド**: http://localhost:3000
-- **バックエンド API**: http://localhost:8000
-- **API 健康チェック**: http://localhost:8000/health
+## How it works
 
-## 使用方法
+```mermaid
+graph TD
+    A((Start)) --> B1{Are requirements sufficient?}
+    B1 -- Yes --> C[Summarize requirements]
+    B1 -- No --> B2[Ask a question]
+    B2 --> B3[User response]
+    B3 --> B1
 
-1. ブラウザで http://localhost:3000 にアクセス
-2. チャット欄で要件を入力（例：「Web アプリ用のストレージアカウントが欲しい」）
-3. AI が質問を重ねて要件を明確化
-4. 要件が十分集まったら Bicep コードが右側のエディタに表示
+    C -- Use user requirements as context --> D[Generate Bicep code]
+    D --> E[Lint the Bicep code]
+    E --> F{Are there lint errors?}
+    F -- Yes --> G1[Retrieve documentation]
+    G1 --> G2[Generate guidance to fix errors]
+    G2 -- Use lint errors and guidance as context --> D
+    F -- No --> Y[Final Bicep code]
+    Y --> Z[User review and download]
+    Z --> End((End))
 
-## トラブルシューティング
-
-### Windows での注意点
-
-- バックエンドのホストは`127.0.0.1`を使用（`0.0.0.0`だと Windows ファイアウォールでブロックされる場合があります）
-- ポート 8000 が使用中の場合は別のポートを指定：`--port 8001`
-- ポート 3000 が使用中の場合は別のポート (e.g. 3001) でフロントエンドが立ち上がります。この場合、バックエンドへの API コールが CORS エラーになることがあります。`backend/app.py`の CORS 設定を修正してください。
-
-### デバッグモード
-
-詳細なログを確認したい場合：
-
-```powershell
-# デバッグログ有効化
-$env:DEBUG_LOG = "1"
-cd backend
-python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+    classDef llm stroke:#333,stroke-width:1px,stroke-dasharray: 4;
+    class B1,B2,C,D,G2 llm;
 ```
 
-### API 直接テスト
+## License
 
-```powershell
-# 健康チェック
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method GET
-
-# チャットテスト
-$body = @{ message = "テストメッセージ" } | ConvertTo-Json
-$headers = @{ "Content-Type" = "application/json" }
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/chat" -Method POST -Body $body -Headers $headers
-
-# セッションリセット
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/reset" -Method POST
-
-# Azure設定確認
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/config" -Method GET
-```
-
-## API エンドポイント
-
-- `GET /`: ウェルカムメッセージ
-- `POST /chat`: チャットメッセージ送信
-- `POST /reset`: セッションリセット
-- `GET /health`: サービス健康状態
-- `GET /config`: Azure 設定確認（API キー除く）
-
-## ファイル構成
-
-```
-TestLangGraph/
-├── .env                   # Azure OpenAI設定（要作成）
-├── README.md              # このファイル
-├── backend/
-│   ├── requirements.txt   # Python依存関係
-│   ├── pyproject.toml     # uv用設定
-│   └── app.py             # FastAPI サーバー
-└── frontend/              # Next.js アプリ
-    ├── package.json
-    ├── app/
-    │   ├── layout.tsx
-    │   └── page.tsx       # メインチャットUI
-    └── components/        # UIコンポーネント
-```
-
-## ライセンス
-
-このプロジェクトはテスト・学習目的で作成されています。
+This project is licensed under the MIT License (SPDX: MIT). See the `LICENSE` file for details.
