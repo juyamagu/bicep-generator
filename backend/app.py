@@ -3,6 +3,8 @@ import re
 import shutil
 import tempfile
 import subprocess
+import logging
+from datetime import datetime
 from typing import List, Dict, Any, Annotated, TypedDict, Optional
 
 import dotenv
@@ -58,6 +60,44 @@ CODE_DEPLOYMENT_NAME = os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
 DEBUG_LOG = os.getenv("DEBUG_LOG", "0") in ("1", "true", "True")  # Enable debug logging
 MAX_HEARING_COUNT = int(os.getenv("MAX_HEARING_COUNT", "20"))  # Maximum number of hearing attempts
 MAX_GENERATION_COUNT = int(os.getenv("MAX_GENERATION_COUNT", "5"))  # Maximum number of code generation attempts
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Logging configuration
+# ──────────────────────────────────────────────────────────────────────────────
+# Console: controlled by DEBUG_LOG
+# Log file: always DEBUG level
+
+_LOG_LEVEL = logging.DEBUG if DEBUG_LOG else logging.INFO
+logger = logging.getLogger("bicep-generator")
+logger.setLevel(logging.DEBUG)
+_has_console = any(
+    isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in logger.handlers
+)
+if not _has_console:
+    _console_handler = logging.StreamHandler()
+    _console_handler.setLevel(_LOG_LEVEL)
+    _console_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(funcName)s] %(message)s"))
+    logger.addHandler(_console_handler)
+else:
+    for _h in logger.handlers:
+        if isinstance(_h, logging.StreamHandler) and not isinstance(_h, logging.FileHandler):
+            _h.setLevel(_LOG_LEVEL)
+
+_log_filename = datetime.now().strftime("%Y%m%d.log")
+_log_file_path = os.getenv("APP_LOG_FILE", os.path.join(os.path.dirname(__file__), "logs", _log_filename))
+try:
+    os.makedirs(os.path.dirname(_log_file_path), exist_ok=True)
+except Exception:
+    pass
+
+if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+    _file_handler = logging.FileHandler(_log_file_path, encoding="utf-8")
+    _file_handler.setLevel(logging.DEBUG)
+    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s:%(funcName)s] %(message)s"))
+    logger.addHandler(_file_handler)
+
+logger.propagate = False
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FastAPI initialization & CORS
@@ -217,9 +257,6 @@ async def hearing(state: State):
 
     Determine whether to continue the hearing; if necessary, ask a single short follow-up question.
     """
-    print("[hearing] called")
-    print("[state]", state)
-
     language = state.get("language", DEFAULT_LANGUAGE)
     dialog_history = _make_dialog_history(state)
 
@@ -233,15 +270,17 @@ async def hearing(state: State):
         },
         {"role": "user", "content": user_content},
     ]
-    is_sufficient = False
+    is_sufficient = True  # default to sufficient to avoid infinite loop
     if state.get("hearing_count", 1) >= MAX_HEARING_COUNT:
         is_sufficient = True
-        print("[requirements_evaluation] Reached MAX_HEARING_COUNT, forcing to sufficient")
+        logger.debug("Reached MAX_HEARING_COUNT, forcing to sufficient")
     else:
-        resp = llm_chat.invoke(messages)
-        ans = _to_text(resp.content).strip().lower()
-        is_sufficient = "yes" in ans
-        print("[requirements_evaluation] answer:", ans, "=> is_sufficient:", is_sufficient)
+        try:
+            resp = llm_chat.invoke(messages)
+            is_sufficient = "yes" in _to_text(resp.content).strip().lower()
+            logger.debug("is_sufficient: %s", is_sufficient)
+        except Exception as e:  # noqa
+            logger.error("Error occurred while invoking LLM: %s", e)
 
     # If no further hearing is necessary, proceed to requirement summarization
     if is_sufficient:
@@ -268,11 +307,11 @@ async def hearing(state: State):
             + f"\n\n## Context:\n{dialog_history}\n",
         },
     ]
-    print("[hearing] messages to LLM:", messages)
+    logger.debug("Messages to LLM: %s", messages)
     resp = await llm_chat.ainvoke(messages)
-    print("[hearing] response from LLM:", resp.content)
-    question = _to_text(resp.content).strip() or get_message("prompts.hearing.fallback_question", language)
+    logger.debug("Response from LLM: %s", resp.content)
 
+    question = _to_text(resp.content).strip() or get_message("prompts.hearing.fallback_question", language)
     return {
         "messages": [{"role": "assistant", "content": question}],
         "hearing_count": state.get("hearing_count", 1) + 1,
@@ -316,10 +355,10 @@ async def summarizing(state: State):
     ]
 
     # LLM invocation
-    print("[summarizing] messages to LLM:", messages)
+    logger.debug("Messages to LLM: %s", messages)
     resp = await llm_chat.ainvoke(messages)
     summary_text = _to_text(resp.content).strip()
-    print("[summarizing] response from LLM:", summary_text)
+    logger.debug("Response from LLM: %s", resp.content)
 
     # If summarization failed, fall back to using the dialog history as the summary
     if summary_text:
@@ -358,14 +397,14 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
         return f"## Bicep Code\n{bicep_code_for_context}"
     # If there is lint but no code, return the lint messages (this should not normally occur)
     if lint_messages and not bicep_code:
-        print("[_retrieve_code_generation_context] Lint messages but no Bicep code")
+        logger.debug("Lint messages but no Bicep code")
         return "## Lint Messages\n" + "\n".join([str(m) for m in lint_messages])
 
     context_lines = []
     bicep_code_blocks = parse_bicep_blocks(bicep_code)
 
     for lint_message in lint_messages[:MAX_LINT_MESSAGES_FOR_CONTEXT]:
-        print(f"[_retrieve_code_generation_context] Processing lint message: {lint_message}")
+        logger.debug("Processing lint message: %s", lint_message)
 
         line = lint_message.line
 
@@ -378,13 +417,13 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
 
         # If no matching code block is found
         if not block:
-            print(f"[_retrieve_code_generation_context] No code block found for lint message: {lint_message}")
+            logger.debug("No code block found for lint message: %s", lint_message)
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
 
         # If the block is not a resource
         if not block.kind == "resource":
-            print(f"[_retrieve_code_generation_context] Block at line {line} is not a resource, kind={block.kind}")
+            logger.debug("Block at line %s is not a resource, kind=%s", line, block.kind)
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
 
@@ -397,13 +436,17 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
             resource_name = m.group(1)
             resource_type = m.group(2)
             api_version = m.group(3)
-            print(
-                f"[_retrieve_code_generation_context] Found resource block for lint message at line {line}: {resource_name}, {resource_type}, {api_version}"
+            logger.debug(
+                "Found resource block for lint message at line %s: %s, %s, %s",
+                line,
+                resource_name,
+                resource_type,
+                api_version,
             )
 
         # If the resource string could not be parsed
         if not resource_type:
-            print(f"[_retrieve_code_generation_context] Failed to parse resource block for lint message at line {line}")
+            logger.debug("Failed to parse resource block for lint message at line %s", line)
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
 
@@ -417,7 +460,7 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
             query_selector='div[data-pivot="deployment-language-bicep"]',
             compressed=True,
         )
-        print(f"[_retrieve_code_generation_context] Fetched docs content from {docs_url}, {len(docs_content)} bytes")
+        logger.debug("Fetched docs content from %s, %s bytes", docs_url, len(docs_content))
 
         # Consult the LLM for improvement suggestions based on lint messages, code block, and documentation
         messages = [
@@ -437,10 +480,10 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
                 ),
             },
         ]
-        print("[_retrieve_code_generation_context] Calling LLM for guidance")
+        logger.debug("Calling LLM for guidance")
         resp = llm_code.invoke(messages)
         guidance = _to_text(resp.content).strip()
-        print(f"[_retrieve_code_generation_context] Guidance from LLM:\n{guidance}")
+        logger.debug("Guidance from LLM:\n%s", guidance)
         if not guidance:
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
@@ -448,7 +491,7 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
             f"## Lint Message at line {line}\n### Lint Message\n{str(lint_message)}\n### Guidance\n{guidance}"
         )
 
-    print("[_retrieve_code_generation_context] context_lines:", context_lines)
+    logger.debug("context_lines: %s", context_lines)
     return f"## Bicep Code\n{bicep_code_for_context}" + "\n\n" + "\n\n".join(context_lines)
 
 
@@ -484,20 +527,20 @@ async def code_generating(state: State):
     # Append additional context
     context = _retrieve_code_generation_context(lint_messages, bicep_code)
     user_prompt += context
-    print("[code_generating] context:", context)
+    logger.debug("context: %s", context)
 
     # LLM invocation
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-    print("[code_generating] calling LLM to generate a bicep code")
+    logger.debug("Calling LLM to generate a Bicep code")
     resp = await llm_code.ainvoke(messages)
-    print("[code_generating] got response from LLM")
+    logger.debug("Response from LLM: %s", resp.content)
 
     # If there's a code block, extract only its contents
     code_text = _to_text(resp.content).strip()
     m = re.search(r"```(?:bicep)?\s*\n([\s\S]*?)```", code_text, flags=re.IGNORECASE)
     if m:
         code_text = m.group(1).strip()
-    print("[code_generating] generated code:", code_text)
+    logger.debug("Generated code: %s", code_text)
 
     return {
         "messages": [{"role": "assistant", "content": chat_message}],
@@ -550,7 +593,7 @@ async def code_validating(state: State):
 
             # Parse lint results
             lint_messages = parse_bicep_lint_output(lint_output_raw)
-            print("[code_validating] lint_messages:", lint_messages)
+            logger.debug("lint_messages: %s", lint_messages)
 
             # Determine whether validation passed
             validation_passed = len(lint_messages) == 0
@@ -661,11 +704,11 @@ def build_graph():
     if SqliteSaver is not None:
         checkpointer = SqliteSaver("checkpoints.db")
         if DEBUG_LOG:
-            print("[graph] Using SqliteSaver(checkpoints.db)")
+            logger.debug("Using SqliteSaver(checkpoints.db)")
     elif MemorySaver is not None:
         checkpointer = MemorySaver()
         if DEBUG_LOG:
-            print("[graph] Using MemorySaver (no persistence)")
+            logger.debug("Using MemorySaver (no persistence)")
     else:
         raise RuntimeError("No available checkpointer: SqliteSaver and MemorySaver are both unavailable")
 
@@ -727,8 +770,7 @@ async def chat_endpoint(request: ChatRequest):
     try:
         session_id = request.session_id or "default"
         config = {"configurable": {"thread_id": session_id}}  # type: ignore[assignment]
-
-        print(f"[chat_endpoint] session_id={session_id} request.message={request.message!r}")
+        logger.debug("session_id=%s request.message=%r", session_id, request.message)
 
         # 1) Add language setting and the human's utterance to the state
         language = request.language or DEFAULT_LANGUAGE
