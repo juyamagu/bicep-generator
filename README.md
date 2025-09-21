@@ -48,10 +48,10 @@ python3 -m venv .venv
 .venv/bin/activate # Linux/macOS
 .venv\Scripts\activate.ps1 # Windows PowerShell
 pip install -r requirements.txt
-python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload --app-dir ..
 
 # Option 2: uv
-uv run -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+uv run -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload --app-dir ..
 ```
 
 3. Start the frontend server.

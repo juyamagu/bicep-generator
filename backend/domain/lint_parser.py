@@ -15,14 +15,14 @@ class BicepLintMessage:
     code: str
     message: str
 
-    def __str__(self) -> str:  # pragma: no cover - formatting helper
+    def __str__(self) -> str:  # pragma: no cover
         return f"({self.line},{self.column}) : {self.severity} {self.code} : {self.message}"  # noqa: E501
 
 
 _LINT_LINE_PATTERN = re.compile(
-    r"^(?P<path>.+?)\((?P<line>\d+),(?P<col>\d+)\)\s*:\s*(?P<severity>\w+)\s+"  # path, position, severity
-    r"(?P<code>[A-Za-z0-9\-]+):\s+"  # code
-    r"(?P<message>.+?)$"  # message (exclude trailing url)
+    r"^(?P<path>.+?)\((?P<line>\d+),(?P<col>\d+)\)\s*:\s*(?P<severity>\w+)\s+"
+    r"(?P<code>[A-Za-z0-9\-]+):\s+"
+    r"(?P<message>.+?)$"
 )
 
 
@@ -31,7 +31,6 @@ def parse_bicep_lint_output(text: str | Iterable[str]) -> List[BicepLintMessage]
         lines = list(text)
     else:
         lines = text.splitlines()
-
     results: List[BicepLintMessage] = []
     for raw in lines:
         line = raw.strip()
@@ -39,12 +38,11 @@ def parse_bicep_lint_output(text: str | Iterable[str]) -> List[BicepLintMessage]
             continue
         m = _LINT_LINE_PATTERN.match(line)
         if not m:
-            continue  # Skip (log if needed)
+            continue
         path_str = m.group("path").strip()
         try:
             path = Path(path_str)
         except OSError:
-            # Keep the path as a string even if it's malformed
             path = Path(path_str.replace("\\", "/"))
         results.append(
             BicepLintMessage(
