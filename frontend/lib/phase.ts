@@ -1,5 +1,5 @@
-// フェーズ状態を表す定数と型定義
-// UI や API レスポンスで使用される phase 文字列を集中管理する
+// Constants and type definitions representing phase states
+// Centralize the phase strings used by the UI and API responses
 
 export const PHASE = {
   HEARING: 'hearing',

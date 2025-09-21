@@ -39,12 +39,12 @@ def parse_bicep_lint_output(text: str | Iterable[str]) -> List[BicepLintMessage]
             continue
         m = _LINT_LINE_PATTERN.match(line)
         if not m:
-            continue  # スキップ (必要ならログなど)
+            continue  # Skip (log if needed)
         path_str = m.group("path").strip()
         try:
             path = Path(path_str)
         except OSError:
-            # パスが異常でも文字列として保持
+            # Keep the path as a string even if it's malformed
             path = Path(path_str.replace("\\", "/"))
         results.append(
             BicepLintMessage(

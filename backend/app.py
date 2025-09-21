@@ -29,7 +29,7 @@ except ImportError:
     from utils import fetch_url_content  # type: ignore
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Checkpointer: SqliteSaver が無い環境では自動で MemorySaver に切替
+# Checkpointer: Automatically fall back to MemorySaver when SqliteSaver is not available
 # ──────────────────────────────────────────────────────────────────────────────
 SqliteSaver = None
 MemorySaver = None
@@ -46,7 +46,7 @@ except Exception:
         pass
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 環境変数
+# Environment variables
 # ──────────────────────────────────────────────────────────────────────────────
 dotenv.load_dotenv()
 
@@ -55,12 +55,12 @@ OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
 CHAT_DEPLOYMENT_NAME = os.getenv("CHAT_DEPLOYMENT_NAME", "gpt-4.1")
 CODE_DEPLOYMENT_NAME = os.getenv("CODE_DEPLOYMENT_NAME", "gpt-4.1")
 
-DEBUG_LOG = os.getenv("DEBUG_LOG", "0") in ("1", "true", "True")  # デバッグログ出力
-MAX_HEARING_COUNT = int(os.getenv("MAX_HEARING_COUNT", "20"))  # ヒアリングの最大回数
-MAX_GENERATION_COUNT = int(os.getenv("MAX_GENERATION_COUNT", "5"))  # コード生成の最大回数
+DEBUG_LOG = os.getenv("DEBUG_LOG", "0") in ("1", "true", "True")  # Enable debug logging
+MAX_HEARING_COUNT = int(os.getenv("MAX_HEARING_COUNT", "20"))  # Maximum number of hearing attempts
+MAX_GENERATION_COUNT = int(os.getenv("MAX_GENERATION_COUNT", "5"))  # Maximum number of code generation attempts
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FastAPI 初期化 & CORS
+# FastAPI initialization & CORS
 # ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Bicep Generator API", version="1.0.0")
 
@@ -73,7 +73,7 @@ app.add_middleware(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# LLM クライアント
+# LLM clients
 # ──────────────────────────────────────────────────────────────────────────────
 llm_chat = AzureChatOpenAI(
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -89,32 +89,32 @@ llm_code = AzureChatOpenAI(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# State / I/O モデル
+# State / I/O model
 # ──────────────────────────────────────────────────────────────────────────────
 class State(TypedDict):
     messages: Annotated[List[AnyMessage], add_messages]
     hearing_count: int
     current_user_message: str
-    bicep_code: str  # 最新生成コード
-    lint_messages: List[BicepLintMessage]  # 解析済み lint 結果
-    validation_passed: bool  # lint 合格
-    generation_count: int  # 生成回数
-    phase: str  # 次のフェーズ名（フロントで見えるフェーズ）
-    requirement_summary: str  # ヒアリング要件サマリ（code_generation プロンプト用）
-    language: str  # 言語設定 ("ja" | "en")
+    bicep_code: str  # Most recently generated code
+    lint_messages: List[BicepLintMessage]  # Parsed lint results
+    validation_passed: bool  # Whether lint validation passed
+    generation_count: int  # Number of generation attempts
+    phase: str  # Next phase name (visible to frontend)
+    requirement_summary: str  # Requirement summary for code_generation prompt
+    language: str  # Language setting ("ja" | "en")
 
 
 class ChatMessage(BaseModel):
     content: str
     sender: str
-    timestamp: Optional[str] = None  # 使わない場合は省略可
+    timestamp: Optional[str] = None  # Optional; may be omitted if unused
 
 
 class ChatRequest(BaseModel):
-    session_id: Optional[str] = "default"  # フロントから会話IDを渡すのが推奨
-    message: Optional[str] = None  # 空の場合は「AIの次のステップだけ」進める
-    language: Optional[str] = DEFAULT_LANGUAGE  # 言語設定 ("ja" | "en")
-    conversation_history: List[ChatMessage] = []  # 未使用（保持はcheckpointerに任せる）
+    session_id: Optional[str] = "default"  # Recommended to provide conversation ID from the frontend
+    message: Optional[str] = None  # If empty, proceed only with the AI's next step
+    language: Optional[str] = DEFAULT_LANGUAGE  # Language setting ("ja" | "en")
+    conversation_history: List[ChatMessage] = []  # Unused (storage is handled by the checkpointer)
 
 
 class ChatResponse(BaseModel):
@@ -122,10 +122,9 @@ class ChatResponse(BaseModel):
     bicep_code: str = ""
     phase: str = ""
     requirement_summary: str = ""
-    requires_user_input: bool = True  # フロントエンドが次のユーザー入力を待つ必要があるか（True=待つ）
+    requires_user_input: bool = True  # Whether the frontend must wait for the next user input (True = wait)
 
 
-# 初期化ヘルパー: State のデフォルトを返す関数とセッション初期化関数
 def initial_state(language: str = DEFAULT_LANGUAGE) -> Dict[str, Any]:
     """Return a fresh initial state dict. Use this for both first-time initialization and resets."""
     return {
@@ -163,7 +162,7 @@ def ensure_session_initialized(config: Dict[str, Any], language: str = DEFAULT_L
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ノード定義（プロンプトはそのまま）
+# Node definitions (prompts are left unchanged)
 # ──────────────────────────────────────────────────────────────────────────────
 def _to_text(raw: Any) -> str:
     if isinstance(raw, str):
@@ -187,10 +186,10 @@ def _to_text(raw: Any) -> str:
 
 
 def _make_dialog_history(state: State) -> str:
-    """State から LLM invoke 用の会話履歴を生成する
+    """Generate dialog history from State for LLM invocation
 
-    会話履歴は state["messages"] に格納されているが、適切に適切に変換する必要がある。
-    返す形式は List[{"role": "user"|"assistant", "content": "..."}]
+    The dialog history is stored in state["messages"] and must be converted appropriately.
+    The returned format is a string where each message is prefixed by its role and content.
     """
     dialog = ""
     for msg in state.get("messages", []):
@@ -214,16 +213,17 @@ def _make_dialog_history(state: State) -> str:
 
 
 async def hearing(state: State):
-    """要件ヒアリング ノード
+    """Requirement-hearing node
 
-    ヒアリングを続けるべきかの判定を先に行い、必要なら 1 問だけ短く投げる"""
+    Determine whether to continue the hearing; if necessary, ask a single short follow-up question.
+    """
     print("[hearing] called")
     print("[state]", state)
 
     language = state.get("language", DEFAULT_LANGUAGE)
     dialog_history = _make_dialog_history(state)
 
-    # ヒアリングを続けるべきかの判定
+    # Determine whether to continue the hearing
     user_content = get_message("prompts.requirements_evaluation.user_instruction", language)
     user_content += f"\n\n## Context:\n{dialog_history}\n"
     messages = [
@@ -243,7 +243,7 @@ async def hearing(state: State):
         is_sufficient = "yes" in ans
         print("[requirements_evaluation] answer:", ans, "=> is_sufficient:", is_sufficient)
 
-    # ヒアリングの必要がない場合は、要件サマリに進む
+    # If no further hearing is necessary, proceed to requirement summarization
     if is_sufficient:
         return {
             "messages": [
@@ -256,7 +256,7 @@ async def hearing(state: State):
             "phase": Phase.SUMMARIZING.value,
         }
 
-    # ヒアリングを続ける場合は、簡単な質問を1問だけ投げる
+    # If continuing the hearing, ask a single short follow-up question
     messages = [
         {
             "role": "system",
@@ -281,7 +281,7 @@ async def hearing(state: State):
 
 
 def should_hear_again(state: State) -> str:
-    """ヒアリング継続判定: 'yes' or 'no' を返す（同期関数）"""
+    """Determine whether to continue the hearing: returns 'yes' or 'no' (synchronous function)"""
     phase = state.get("phase", "")
     if phase == Phase.HEARING.value:
         return "yes"
@@ -289,18 +289,19 @@ def should_hear_again(state: State) -> str:
 
 
 async def summarizing(state: State):
-    """要件サマリ生成 ノード
+    """Requirement summarization node
 
-    ヒアリング会話全体から要件サマリを生成し state に格納する。"""
+    Generate a requirement summary from the entire hearing conversation and store it in state.
+    """
     language = state.get("language", DEFAULT_LANGUAGE)
 
-    # 会話履歴を文字列化（長すぎる場合は適度にトリム）
+    # Serialize dialog history (trim if it's too long)
     MAX_DIALOG_HISTORY = 8000
     dialog_history = _make_dialog_history(state)
     if len(dialog_history) > MAX_DIALOG_HISTORY:
         dialog_history = dialog_history[-MAX_DIALOG_HISTORY:]
 
-    # 要件サマリ生成プロンプト
+    # Requirement summary generation prompt
     messages = [
         {
             "role": "system",
@@ -314,13 +315,13 @@ async def summarizing(state: State):
         },
     ]
 
-    # LLM 呼び出し
+    # LLM invocation
     print("[summarizing] messages to LLM:", messages)
     resp = await llm_chat.ainvoke(messages)
     summary_text = _to_text(resp.content).strip()
     print("[summarizing] response from LLM:", summary_text)
 
-    # 要件サマリの作成に失敗した場合は会話履歴をそのまま使う
+    # If summarization failed, fall back to using the dialog history as the summary
     if summary_text:
         message = get_message(
             "messages.summarize_requirements.generation_succeeded", language, summary_text=summary_text
@@ -332,12 +333,16 @@ async def summarizing(state: State):
     return {
         "messages": [{"role": "assistant", "content": message}],
         "requirement_summary": summary_text,
-        "phase": Phase.CODE_GENERATING.value,  # 次は code_generating に進む
+        "phase": Phase.CODE_GENERATING.value,  # Next phase: code_generating
     }
 
 
 def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bicep_code: str) -> str:
-    """Lint メッセージに基づいて修正ポイントを記載したコンテキスト文字を取得する"""
+    """Build context text describing fix points based on lint messages
+
+    Returns a string that contains relevant code and/or lint information to provide context
+    for subsequent code generation requests.
+    """
     MAX_BICEP_CODE = 8000
     MAX_LINT_MESSAGES_FOR_CONTEXT = 3
 
@@ -345,13 +350,13 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
         bicep_code if len(bicep_code) <= MAX_BICEP_CODE else bicep_code[:MAX_BICEP_CODE] + "\n(... truncated)"
     )
 
-    # lint も code も空なら、context は必要ない
+    # If both lint messages and code are empty, no context is needed
     if not lint_messages and not bicep_code:
         return ""
-    # lint のみが空なら、code を context として返す
+    # If there are no lint messages but code exists, return the code as context
     if bicep_code and not lint_messages:
         return f"## Bicep Code\n{bicep_code_for_context}"
-    # code のみが空なら、lint メッセージを返す (通常はありえないはず)
+    # If there is lint but no code, return the lint messages (this should not normally occur)
     if lint_messages and not bicep_code:
         print("[_retrieve_code_generation_context] Lint messages but no Bicep code")
         return "## Lint Messages\n" + "\n".join([str(m) for m in lint_messages])
@@ -364,27 +369,26 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
 
         line = lint_message.line
 
-        # 該当行を含むブロックを検索する
+        # Search for the block that contains the relevant line
         block = None
         for b in bicep_code_blocks:
             if b.start_line <= line <= b.end_line:
                 block = b
                 break
 
-        # 該当するコードブロックが見つからない場合
+        # If no matching code block is found
         if not block:
             print(f"[_retrieve_code_generation_context] No code block found for lint message: {lint_message}")
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
 
-        # リソース ブロック以外の場合
+        # If the block is not a resource
         if not block.kind == "resource":
             print(f"[_retrieve_code_generation_context] Block at line {line} is not a resource, kind={block.kind}")
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
 
-        # リソース ブロックの場合
-        # リソースプロバイダ、タイプ、API バージョンを抽出
+        # For resource blocks: extract provider, type, and API version
         resource_name = ""
         resource_type = ""
         api_version = ""
@@ -397,13 +401,13 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
                 f"[_retrieve_code_generation_context] Found resource block for lint message at line {line}: {resource_name}, {resource_type}, {api_version}"
             )
 
-        # リソース文字列がパースできなかった場合
+        # If the resource string could not be parsed
         if not resource_type:
             print(f"[_retrieve_code_generation_context] Failed to parse resource block for lint message at line {line}")
             context_lines.append(f"## Lint Message at line {line}\n{str(lint_message)}")
             continue
 
-        # 公式ドキュメントの該当ページを取得
+        # Fetch the relevant official documentation page
         # Sample: https://learn.microsoft.com/en-us/azure/templates/Microsoft.Network/virtualNetworks/virtualNetworkPeerings?pivots=deployment-language-bicep
         docs_url = f"https://learn.microsoft.com/en-us/azure/templates/{resource_type.lower()}/?pivots=deployment-language-bicep"
         docs_content = fetch_url_content(
@@ -415,7 +419,7 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
         )
         print(f"[_retrieve_code_generation_context] Fetched docs content from {docs_url}, {len(docs_content)} bytes")
 
-        # Lint メッセージ、コードブロック、ドキュメント を基に、改善案を LLM に問い合わせる
+        # Consult the LLM for improvement suggestions based on lint messages, code block, and documentation
         messages = [
             {
                 "role": "system",
@@ -449,21 +453,21 @@ def _retrieve_code_generation_context(lint_messages: List[BicepLintMessage], bic
 
 
 async def code_generating(state: State):
-    """Bicep コード生成 / 再生成 ノード
+    """Bicep code generation / regeneration node
 
-    - 要件サマリと直近の lint 結果を踏まえてコード生成
-    - 直近生成コードがあれば再生成プロンプトを利用
+    - Generate code based on the requirement summary and recent lint results
+    - Use a regeneration prompt if previously generated code exists
     """
     language = state.get("language", DEFAULT_LANGUAGE)
     requirement_summary = state.get("requirement_summary")
     assert (
         isinstance(requirement_summary, str) and requirement_summary.strip()
-    ), "requirement_summary はコード生成に必須"
+    ), "requirement_summary is required for code generation"
     lint_messages = state.get("lint_messages", [])
     bicep_code = state.get("bicep_code", "")
     generation_count = state.get("generation_count", 0)
 
-    # プロンプト構築
+    # Build prompts
     if generation_count == 0:
         system_prompt = get_message("prompts.code_generation.system_initial", language)
         user_prompt = get_message(
@@ -477,18 +481,18 @@ async def code_generating(state: State):
         )
         chat_message = get_message("messages.code_generation.regeneration_done", language)
 
-    # その他のコンテキストを付与
+    # Append additional context
     context = _retrieve_code_generation_context(lint_messages, bicep_code)
     user_prompt += context
     print("[code_generating] context:", context)
 
-    # LLM 呼び出し
+    # LLM invocation
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     print("[code_generating] calling LLM to generate a bicep code")
     resp = await llm_code.ainvoke(messages)
     print("[code_generating] got response from LLM")
 
-    # コードブロックがあれば中身だけ抽出
+    # If there's a code block, extract only its contents
     code_text = _to_text(resp.content).strip()
     m = re.search(r"```(?:bicep)?\s*\n([\s\S]*?)```", code_text, flags=re.IGNORECASE)
     if m:
@@ -499,15 +503,15 @@ async def code_generating(state: State):
         "messages": [{"role": "assistant", "content": chat_message}],
         "bicep_code": code_text,
         "generation_count": generation_count + 1,
-        "phase": Phase.CODE_VALIDATING.value,  # 次は code_validating に進む
+        "phase": Phase.CODE_VALIDATING.value,  # Next phase: code_validating
     }
 
 
 async def code_validating(state: State):
-    """Bicep コード検証 ノード
+    """Bicep code validation node
 
-    生成されたコードを一時ファイルに保存し、`az bicep lint` コマンドで検証する。
-    検証結果をパースして state に格納する。
+    Save the generated code to a temporary file and validate it using `az bicep lint`.
+    Parse the validation output and store it in the state.
     """
     language = state.get("language", DEFAULT_LANGUAGE)
     chat_message = ""
@@ -517,8 +521,7 @@ async def code_validating(state: State):
             return "az bicep"
         return "bicep"
 
-    # 生成コードの取得
-    # 編集画面でコードが空になっている場合もあるので、その場合は検証せずに終了する
+    # Obtain the generated code. The editor may be empty; if so, skip validation and return.
     code = state.get("bicep_code", "")
     if not code:
         return {
@@ -527,7 +530,7 @@ async def code_validating(state: State):
             "validation_passed": False,
         }
 
-    # 一時ファイルに保存して lint 実行
+    # Save to a temporary file and run lint
     tmp_path = None
     lint_output = ""
     try:
@@ -545,21 +548,21 @@ async def code_validating(state: State):
             )
             lint_output_raw = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
-            # lint 結果のパース
+            # Parse lint results
             lint_messages = parse_bicep_lint_output(lint_output_raw)
             print("[code_validating] lint_messages:", lint_messages)
 
-            # 検証合格かどうか
+            # Determine whether validation passed
             validation_passed = len(lint_messages) == 0
 
-            # プレビューは最大10件に制限
+            # Limit the preview to at most 10 items
             MAX_LINT_MESSAGES_FOR_PREVIEW = 10
             preview_lines = [str(lint_msg) for lint_msg in lint_messages[:MAX_LINT_MESSAGES_FOR_PREVIEW]]
             if len(lint_messages) > MAX_LINT_MESSAGES_FOR_PREVIEW:
                 preview_lines.append(f"... ({len(lint_messages)-MAX_LINT_MESSAGES_FOR_PREVIEW} more)")
             lint_output = "\n".join(preview_lines)
 
-            # ユーザーメッセージの構築
+            # Construct user-facing message
             if validation_passed:
                 chat_message = get_message("messages.code_validation.lint_succeeded", language)
             else:
@@ -583,7 +586,7 @@ async def code_validating(state: State):
             except Exception:
                 pass
 
-    # 次のフェーズ決定
+    # Decide the next phase
     generation_count = state.get("generation_count", 0)
     if not validation_passed and generation_count < MAX_GENERATION_COUNT:
         next_phase = Phase.CODE_GENERATING.value
@@ -606,11 +609,11 @@ def should_regenerate_code(state: State) -> str:
 
 
 async def completed(state: State):
-    """完了 ノード
+    """Completion node
 
-    - ヒアリング or コード生成のどちらかで完了した場合に到達する
-    - 再生成上限に達した場合もここに来る
-    - 最終メッセージを返すだけ
+    - Reached when either the hearing or code generation flow completes
+    - Also reached when the regeneration limit is hit
+    - Simply returns the final message
     """
     language = state.get("language", DEFAULT_LANGUAGE)
     generation_count = state.get("generation_count", 0)
@@ -628,7 +631,7 @@ async def completed(state: State):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# グラフ構築（checkpointer 付き：SQLite → 無ければ Memory に自動フォールバック）
+# Graph construction (with checkpointer: SQLite -> fall back to MemorySaver if unavailable)
 # ──────────────────────────────────────────────────────────────────────────────
 def build_graph():
     gb = StateGraph(State)
@@ -673,7 +676,7 @@ GRAPH = build_graph()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ルーティング
+# Routing
 # ──────────────────────────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
@@ -698,28 +701,28 @@ async def get_config():
 @app.post("/reset")
 async def reset_conversation(session_id: Optional[str] = "default"):
     """
-    会話リセット（簡易版）
-    - 実運用はフロントで毎会話UUIDを割り当て、thread_idを変更するのが最も安全
-    - ここでは messages, bicep_code などを空にする
+    Conversation reset (simple)
+    - In production, it is safest for the frontend to assign a UUID per conversation and change the thread_id
+    - Here we simply clear messages, bicep_code and related fields
     """
     config = {"configurable": {"thread_id": session_id or "default"}}  # type: ignore[assignment]
     GRAPH.update_state(  # type: ignore[arg-type]
         config,  # type: ignore[arg-type]
         initial_state(),
     )
-    return {"message": f"会話({session_id})がリセットされました"}
+    return {"message": f"The conversation (session_id: {session_id}) has been reset."}
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     """
-    使い方:
-      1) POST /chat {"session_id":"abc","message":"ストレージがほしい"}
-         → 質問が返る（is_complete=false）
-      2) POST /chat {"session_id":"abc","message":"Webアプリ用です"}
-         → 次の質問（is_complete=false）
-      3) …繰り返し
-      4) 十分な要件になると code_generation が走り、bicep_code + is_complete=true を返す
+    Usage:
+      1) POST /chat {"session_id":"abc","message":"I need storage"}
+         -> a question is returned (is_complete=false)
+      2) POST /chat {"session_id":"abc","message":"For a web app"}
+         -> next question (is_complete=false)
+      3) …repeat
+      4) When requirements are sufficient, code_generation runs and returns bicep_code + is_complete=true
     """
     try:
         session_id = request.session_id or "default"
@@ -727,13 +730,13 @@ async def chat_endpoint(request: ChatRequest):
 
         print(f"[chat_endpoint] session_id={session_id} request.message={request.message!r}")
 
-        # ① 言語設定とHumanの発話を state に追加
+        # 1) Add language setting and the human's utterance to the state
         language = request.language or DEFAULT_LANGUAGE
         state_update = {"language": language}
         if request.message:
             state_update["messages"] = [{"role": "user", "content": request.message}]  # type: ignore[assignment]
 
-        # セッション初期化（stateが空の場合のみ）
+        # Initialize the session (only if the state is empty)
         ensure_session_initialized(config, language)
 
         GRAPH.update_state(  # type: ignore[arg-type]
@@ -741,19 +744,19 @@ async def chat_endpoint(request: ChatRequest):
             state_update,
         )
 
-        # ② グラフを進める（非同期ストリームの最初の1つだけ取得して即抜ける）
+        # 2) Advance the graph (take only the first update from the async stream and return immediately)
         state = GRAPH.get_state(config).values  # type: ignore[arg-type]
         async for _chunk in GRAPH.astream(None, config=config, stream_mode="updates"):  # type: ignore[arg-type]
             break
 
-        # ③ 現在stateを取得
+        # 3) Retrieve the current state
         state = GRAPH.get_state(config).values  # type: ignore[arg-type]
         messages = state.get("messages", [])
         bicep_code = state.get("bicep_code") or ""
         phase = state.get("phase", "")
         requirement_summary = state.get("requirement_summary", "")
 
-        # 直近のAI発話
+        # Latest AI utterance
         latest_ai_text = None
         for msg in reversed(messages):
             if isinstance(msg, dict):
@@ -767,16 +770,16 @@ async def chat_endpoint(request: ChatRequest):
                 latest_ai_text = msg
                 break
 
-        # requires_user_input 判定
-        # - True: ユーザーの回答待ちが必要なとき (主に hearing の質問)
-        # - False: 自動で次ステップへ進めたい中間状態
+        # Determine whether user input is required
+        # - True: when waiting for user's answer (mainly during hearing phase)
+        # - False: intermediate states where the system should auto-advance
         requires_user_input = phase in {p.value for p in REQUIRE_USER_INPUT_PHASES}
         is_completed = phase == Phase.COMPLETED.value
         if is_completed:
             requires_user_input = False
 
-        # 完了時メッセージのデフォルト
-        default_msg = "Bicepコードの生成が完了しました！" if is_completed else "次の質問を用意しています…"
+        # Default message when complete
+        default_msg = "Bicep code generation complete!" if is_completed else "Preparing the next question..."
 
         return ChatResponse(
             message=latest_ai_text or default_msg,
@@ -787,9 +790,7 @@ async def chat_endpoint(request: ChatRequest):
         )
 
     except Exception as e:  # noqa
-        if DEBUG_LOG:
-            print("[chat] ERROR:", repr(e))
-        raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error occurred during processing: " + str(e))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -798,5 +799,4 @@ async def chat_endpoint(request: ChatRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    # Windows環境では明示的にlocalhostを指定すると楽
     uvicorn.run(app, host="127.0.0.1", port=8000)

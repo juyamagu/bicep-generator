@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-import requests
+import requests  # type: ignore
 import re
 
 try:
@@ -26,22 +26,22 @@ def fetch_url_content(
     compressed: bool = False,
 ) -> str:
     """
-    指定した URL からテキストコンテンツを取得して文字列で返す。
+    Fetch text content from the specified URL and return it as a string.
 
-    挙動:
-    - 指定秒数でタイムアウトする (timeout)
-    - レスポンスの Content-Type がテキスト系 (text/html, application/json など) でない場合は空文字を返す
-    - サイズが大きすぎる場合は max_bytes で切り詰める
-    - エラー発生時は空文字を返し、デバッグログを出力する
+    Behavior:
+    - Times out after the specified number of seconds (timeout)
+    - Returns an empty string if the response Content-Type is not text-like (text/html, application/json, etc.)
+    - Truncates content that exceeds max_bytes
+    - On error, returns an empty string and emits debug logs
 
     Args:
-        url: 取得対象の URL
-        timeout: リクエストのタイムアウト (秒)
-        max_bytes: 読み取る最大バイト数 (超過時は切り詰め)
-        query_selector: HTML の要素の選択子 (例: "div#content", "p.class_name")
+        url: URL to fetch
+        timeout: Request timeout in seconds
+        max_bytes: Maximum number of bytes to read (truncated if exceeded)
+        query_selector: CSS selector for an HTML element (e.g. "div#content", "p.class_name")
 
     Returns:
-        取得したテキスト (失敗時は "")
+        The fetched text ("" on failure)
     """
     try:
         headers = {
@@ -52,19 +52,19 @@ def fetch_url_content(
             resp.raise_for_status()
 
             content_type = (resp.headers.get("Content-Type") or "").lower()
-            # テキスト系でない場合は取得しない
+            # Do not fetch non-text content
             if not any(t in content_type for t in ("text", "html", "json", "xml")):
                 logger.debug("fetch_url_content: unsupported content-type %s for %s", content_type, url)
                 return ""
 
             parts = []
             read_bytes = 0
-            # decode_unicode=True により text チャンクを直接受け取る
+            # With decode_unicode=True the iter_content yields text chunks directly
             for chunk in resp.iter_content(chunk_size=8192, decode_unicode=True):
                 if not chunk:
                     continue
                 if isinstance(chunk, bytes):
-                    # バイト列の場合はレスポンスのエンコーディングでデコード
+                    # If chunk is bytes, decode using the response encoding
                     chunk = chunk.decode(resp.encoding or "utf-8", errors="replace")
                 chunk_len = len(chunk)
                 if read_bytes + chunk_len > max_bytes:
@@ -75,7 +75,7 @@ def fetch_url_content(
 
             text = "".join(parts)
 
-            # If selector requested and BeautifulSoup is available and content is HTML
+            # If a selector is requested and BeautifulSoup is available and the content is HTML
             if query_selector and BeautifulSoup is not None and "html" in content_type:
                 try:
                     soup = BeautifulSoup(text, "html.parser")

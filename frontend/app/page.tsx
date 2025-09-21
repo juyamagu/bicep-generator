@@ -306,7 +306,7 @@ export default function Home() {
       console.error("Error sending message:", error)
       const errorResponse: Message = {
         id: `${Date.now()}-error`,
-        content: `エラーが発生しました。バックエンドサーバーが起動していることを確認してください。`,
+        content: `Error: ${error instanceof Error ? error.message : "Unknown error occurred."} Please try again.`,
         sender: "assistant",
         timestamp: new Date(),
       }
@@ -541,7 +541,6 @@ export default function Home() {
             >
               <Play className="h-4 w-4" />
             </Button>
-            {/* text-muted-foreground と同じ色 */}
             <Separator orientation="vertical" />
             <ThemeToggle className="text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-xl" />
             <SettingsDialog onLanguageChange={handleLanguageChange} />
